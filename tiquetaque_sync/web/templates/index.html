@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TiqueTaque Sync — Monitor de Jornada & Notificações</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+</head>
+<body class="dark-theme">
+    <!-- Ambient glowing backgrounds -->
+    <div class="ambient-glow glow-top"></div>
+    <div class="ambient-glow glow-bottom"></div>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2" fill="none">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>TiqueTaque <span>Sync</span></h1>
+                    <span class="version-tag">Local</span>
+                </div>
+            </div>
+
+            <div class="navbar-center">
+                <div class="live-clock-card">
+                    <span id="live-time" class="live-time">--:--:--</span>
+                    <span id="live-date" class="live-date">Carregando...</span>
+                </div>
+            </div>
+
+            <div class="navbar-actions">
+                <div id="status-pill" class="status-pill status-loading">
+                    <span class="pulse-dot"></span>
+                    <span id="status-label">Carregando...</span>
+                </div>
+                <button id="btn-sync" class="btn btn-secondary" title="Sincronizar agora">
+                    <svg id="sync-icon" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+                        <path d="M23 4v6h-6"></path>
+                        <path d="M1 20v-6h6"></path>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                    <span>Sincronizar</span>
+                </button>
+                <a href="/settings" class="btn btn-secondary" title="Configurações">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <span>Configurar</span>
+                </a>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Content -->
+        <main class="dashboard-grid">
+            <div id="setup-banner" class="setup-banner hidden">
+                <strong>Configuração pendente:</strong> informe seu e-mail e código do TiqueTaque para
+                começar a sincronizar. <a href="/settings">Abrir configurações →</a>
+            </div>
+            <!-- Hero Stats Bento Grid -->
+            <section class="bento-grid">
+                <!-- Card 1: Horas Trabalhadas -->
+                <div class="card stat-card glow-card">
+                    <div class="card-header">
+                        <span class="card-title">Horas Trabalhadas Hoje</span>
+                        <span class="card-badge" id="target-badge">Meta: 08h00</span>
+                    </div>
+                    <div class="card-value-group">
+                        <h2 id="metric-worked" class="hero-metric">00h00min</h2>
+                        <div class="progress-wrapper">
+                            <div class="progress-bar-bg">
+                                <div id="progress-bar" class="progress-bar-fill" style="width: 0%;"></div>
+                            </div>
+                            <span id="progress-text" class="progress-label">0% concluído</span>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <span class="subtext" id="worked-subtext">Baseado nas batidas registradas</span>
+                    </div>
+                </div>
+
+                <!-- Card 2: Contagem Regressiva & Próximo Alerta -->
+                <div class="card stat-card countdown-card">
+                    <div class="card-header">
+                        <span class="card-title" id="alert-title">Próximo Alerta</span>
+                        <span class="badge-alert-type" id="alert-channel-badge">Telegram & Slack</span>
+                    </div>
+                    <div class="card-value-group">
+                        <h2 id="metric-countdown" class="hero-metric mono-font">--:--:--</h2>
+                        <p id="alert-description" class="alert-desc">Sincronizando com a escala...</p>
+                    </div>
+                    <div class="card-footer">
+                        <span class="subtext" id="alert-footer-info">Notificações automáticas ativas</span>
+                    </div>
+                </div>
+
+                <!-- Card 3: Previsão de Término -->
+                <div class="card stat-card">
+                    <div class="card-header">
+                        <span class="card-title">Previsão de Saída</span>
+                        <span class="icon-indicator">🎯</span>
+                    </div>
+                    <div class="card-value-group">
+                        <h2 id="metric-departure" class="hero-metric mono-font">--:--</h2>
+                        <p class="stat-meta">Horário exato para fechar as 8h</p>
+                    </div>
+                    <div class="card-footer">
+                        <span class="subtext">Ajustado com o tempo real de almoço</span>
+                    </div>
+                </div>
+
+                <!-- Card 4: Saldo do Dia -->
+                <div class="card stat-card">
+                    <div class="card-header">
+                        <span class="card-title">Saldo Estimado</span>
+                        <span class="icon-indicator">⚖️</span>
+                    </div>
+                    <div class="card-value-group">
+                        <h2 id="metric-balance" class="hero-metric mono-font">00h00min</h2>
+                        <p id="metric-balance-desc" class="stat-meta">Em dia</p>
+                    </div>
+                    <div class="card-footer">
+                        <span class="subtext" id="lunch-duration-info">Almoço: 00h00min</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Lower Section: Timeline + Channels -->
+            <div class="content-split">
+                <!-- Left: Timeline de Batidas do Dia -->
+                <section class="card timeline-section">
+                    <div class="section-header">
+                        <div class="section-title-group">
+                            <h3>Batidas Registradas Hoje</h3>
+                            <span id="entries-count-badge" class="counter-badge">0 batidas</span>
+                        </div>
+                        <button id="btn-clock-in-modal" class="btn btn-primary btn-sm">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="16"></line>
+                                <line x1="8" y1="12" x2="16" y2="12"></line>
+                            </svg>
+                            <span>Bater Ponto</span>
+                        </button>
+                    </div>
+
+                    <div id="timeline-container" class="timeline-container">
+                        <div class="timeline-loading">Carregando batidas do TiqueTaque...</div>
+                    </div>
+                </section>
+
+                <!-- Right: Notificações & Conectividade -->
+                <section class="card channels-section">
+                    <div class="section-header">
+                        <h3>Canais de Notificação</h3>
+                        <a href="/settings" class="subtext-pill link-pill">Ajustar</a>
+                    </div>
+
+                    <div class="channels-list">
+                        <!-- Telegram -->
+                        <div class="channel-card">
+                            <div class="channel-info">
+                                <div class="channel-icon telegram-icon">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="channel-name">Telegram Bot</div>
+                                    <div id="telegram-status" class="channel-status">Configurado</div>
+                                </div>
+                            </div>
+                            <button id="btn-test-telegram" class="btn btn-outline btn-xs">Testar</button>
+                        </div>
+
+                        <!-- Slack -->
+                        <div class="channel-card">
+                            <div class="channel-info">
+                                <div class="channel-icon slack-icon">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                                        <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.527 2.527 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="channel-name">Slack Incoming Webhook</div>
+                                    <div id="slack-status" class="channel-status">Configurado</div>
+                                </div>
+                            </div>
+                            <button id="btn-test-slack" class="btn btn-outline btn-xs">Testar</button>
+                        </div>
+                    </div>
+
+                    <!-- Work Schedule Info -->
+                    <div class="schedule-summary-box">
+                        <div class="schedule-label">Escala Contratual:</div>
+                        <div id="schedule-desc" class="schedule-value">Seg.-Sex. 08:00 - 17:00 (Intervalo 1h)</div>
+                    </div>
+                </section>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>TiqueTaque Sync — Assistente Pessoal de Ponto & Automação de Jornada</p>
+            <div class="footer-links">
+                <a href="/docs" target="_blank">Swagger API</a>
+                <span class="sep">•</span>
+                <a href="https://tiquetaque.app" target="_blank">TiqueTaque Oficial</a>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Clock-In Modal -->
+    <div id="clock-in-modal" class="modal-backdrop hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Confirmar Registro de Ponto</h3>
+                <button id="btn-close-modal" class="btn-icon">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Você está prestes a registrar o ponto diretamente no TiqueTaque com assinatura <code>X-Check</code>:</p>
+                <div class="modal-time-display" id="modal-current-time">--:--</div>
+                <div class="form-group">
+                    <label for="input-custom-time">Horário específico (opcional):</label>
+                    <input type="time" id="input-custom-time" class="input-field">
+                    <small>Deixe em branco para usar o horário exato atual.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-cancel-clock-in" class="btn btn-secondary">Cancelar</button>
+                <button id="btn-confirm-clock-in" class="btn btn-primary">Registrar Ponto</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

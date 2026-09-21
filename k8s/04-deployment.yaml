@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tique-taque-sync
+  namespace: tique-taque-sync
+  labels:
+    app.kubernetes.io/name: tique-taque-sync
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tique-taque-sync
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tique-taque-sync
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: tique-taque-sync
+          # Imagem pública multi-arch (amd64 + arm64) publicada pelo CI deste repositório.
+          # Prefira fixar uma versão (ex: :1.0.0) em vez de :latest em produção.
+          image: ghcr.io/resendegu/tique-taque-sync:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: tique-taque-sync-config
+            - secretRef:
+                name: tique-taque-sync-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          volumeMounts:
+            - name: data-storage
+              mountPath: /app/data
+            - name: config-storage
+              mountPath: /app/config
+      volumes:
+        # Por padrão usa disco efêmero (emptyDir)
+        # Para persistência de dados de longo prazo entre recriações de pods,
+        # comente a linha emptyDir e descomente o persistentVolumeClaim abaixo:
+        - name: data-storage
+          emptyDir: {}
+        # Configuração vem do ConfigMap/Secret; este volume só existe para que o
+        # app possa gravar config.json caso a tela de configurações seja usada.
+        - name: config-storage
+          emptyDir: {}
+        # - name: data-storage
+        #   persistentVolumeClaim:
+        #     claimName: tique-taque-sync-pvc

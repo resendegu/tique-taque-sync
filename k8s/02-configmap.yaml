@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tique-taque-sync-config
+  namespace: tique-taque-sync
+  labels:
+    app.kubernetes.io/name: tique-taque-sync
+data:
+  TIMEZONE: "America/Sao_Paulo"
+  WORK_HOURS_PER_DAY: "8.0"
+  LUNCH_DURATION_MINUTES: "60"
+  LUNCH_WARNING_ADVANCE_MINUTES: "10"
+  LUNCH_WARNING_FINAL_MINUTES: "1"
+  END_WORK_WARNING_ADVANCE_MINUTES: "15"
+  END_WORK_WARNING_FINAL_MINUTES: "1"
+  CONTINUOUS_WORK_LIMIT_HOURS: "6.0"
+  CONTINUOUS_WORK_WARNING_ADVANCE_MINUTES: "10"
+  CONTINUOUS_WORK_WARNING_FINAL_MINUTES: "1"
+  POLL_INTERVAL_SECONDS: "180"
+  ALERT_TICKER_INTERVAL_SECONDS: "15"
+  DATA_DIR: "/app/data"
+  TIQUETAQUE_SYNC_HOME: "/app/config"
+  OPEN_BROWSER_ON_START: "false"
+  HOST: "0.0.0.0"
+  PORT: "8000"

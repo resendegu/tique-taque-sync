@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tique-taque-sync
+  labels:
+    app.kubernetes.io/name: tique-taque-sync
+    app.kubernetes.io/part-of: tique-taque-suite

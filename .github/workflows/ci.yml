@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Testes (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Rodar a suíte de testes
+        run: python tests/run_tests.py
+
+  package:
+    name: Instalação do pacote
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar o app
+        run: pip install .
+
+      # Garante que os entry points e os arquivos de template/estático foram
+      # empacotados — a causa mais comum de "instala mas não abre o painel".
+      - name: Verificar entry points
+        run: |
+          tiquetaque-sync --version
+          tiquetaque-sync config path
+          tiquetaque-sync autostart status
+
+      - name: Verificar arquivos empacotados
+        shell: python {0}
+        run: |
+          import pathlib
+          import sys
+
+          import tiquetaque_sync
+
+          base = pathlib.Path(tiquetaque_sync.__file__).parent
+          required = [
+              "web/templates/index.html",
+              "web/templates/settings.html",
+              "web/static/css/dashboard.css",
+              "web/static/css/settings.css",
+              "web/static/js/dashboard.js",
+              "web/static/js/settings.js",
+              "web/static/img/favicon.svg",
+          ]
+          missing = [name for name in required if not (base / name).exists()]
+          if missing:
+              sys.exit("Arquivos ausentes no pacote: " + ", ".join(missing))
+          print("Todos os arquivos de dados foram empacotados.")

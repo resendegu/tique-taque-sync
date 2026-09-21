@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configurações — TiqueTaque Sync</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link rel="stylesheet" href="/static/css/settings.css">
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+</head>
+<body class="dark-theme">
+    <div class="ambient-glow glow-top"></div>
+    <div class="ambient-glow glow-bottom"></div>
+
+    <div class="app-container">
+        <header class="navbar">
+            <div class="brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24" width="28" height="28" stroke="currentColor" stroke-width="2" fill="none">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>TiqueTaque <span>Sync</span></h1>
+                    <span class="version-tag">Configurações</span>
+                </div>
+            </div>
+
+            <div class="navbar-actions">
+                <a href="/" class="btn btn-secondary">
+                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+                        <path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path>
+                    </svg>
+                    <span>Voltar ao painel</span>
+                </a>
+            </div>
+        </header>
+
+        <main class="settings-main">
+            <div id="setup-banner" class="setup-banner hidden">
+                <strong>Primeiro acesso:</strong> preencha o e-mail e o código do TiqueTaque abaixo para
+                começar a sincronizar sua jornada.
+            </div>
+
+            <form id="settings-form" class="settings-form">
+                <!-- Conta TiqueTaque -->
+                <section class="card settings-card">
+                    <div class="section-header">
+                        <div class="section-title-group">
+                            <h3>Conta TiqueTaque</h3>
+                            <span class="counter-badge" id="account-state">—</span>
+                        </div>
+                    </div>
+                    <div class="settings-grid">
+                        <div class="form-group">
+                            <label for="tiquetaque_email">E-mail cadastrado</label>
+                            <input type="email" id="tiquetaque_email" name="tiquetaque_email" class="input-field" autocomplete="username">
+                            <small>O mesmo e-mail usado no tiquetaque.app.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="tiquetaque_code">Código de verificação (4 dígitos)</label>
+                            <input type="password" id="tiquetaque_code" name="tiquetaque_code" class="input-field" inputmode="numeric" autocomplete="current-password" placeholder="••••">
+                            <small>Deixe em branco para manter o código já salvo.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="timezone">Fuso horário</label>
+                            <input type="text" id="timezone" name="timezone" class="input-field" list="timezone-options">
+                            <datalist id="timezone-options">
+                                <option value="America/Sao_Paulo"></option>
+                                <option value="America/Manaus"></option>
+                                <option value="America/Belem"></option>
+                                <option value="America/Fortaleza"></option>
+                                <option value="America/Recife"></option>
+                                <option value="America/Cuiaba"></option>
+                                <option value="America/Rio_Branco"></option>
+                                <option value="UTC"></option>
+                            </datalist>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Jornada -->
+                <section class="card settings-card">
+                    <div class="section-header">
+                        <div class="section-title-group">
+                            <h3>Jornada de trabalho</h3>
+                        </div>
+                    </div>
+                    <div class="settings-grid">
+                        <div class="form-group">
+                            <label for="work_hours_per_day">Horas por dia</label>
+                            <input type="number" id="work_hours_per_day" name="work_hours_per_day" class="input-field" min="1" max="24" step="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label for="lunch_duration_minutes">Duração do almoço (minutos)</label>
+                            <input type="number" id="lunch_duration_minutes" name="lunch_duration_minutes" class="input-field" min="0" max="480" step="5">
+                        </div>
+                        <div class="form-group">
+                            <label for="continuous_work_limit_hours">Limite de trabalho contínuo (horas)</label>
+                            <input type="number" id="continuous_work_limit_hours" name="continuous_work_limit_hours" class="input-field" min="1" max="24" step="0.5">
+                            <small>Art. 71 da CLT: 6h é o máximo sem intervalo.</small>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Momentos das notificações -->
+                <section class="card settings-card">
+                    <div class="section-header">
+                        <div class="section-title-group">
+                            <h3>Quando quero ser avisado</h3>
+                            <span class="subtext-pill">Minutos de antecedência</span>
+                        </div>
+                    </div>
+
+                    <div class="moment-row">
+                        <div class="moment-label">
+                            <span class="moment-icon">🍽️</span>
+                            <div>
+                                <div class="moment-name">Fim do almoço</div>
+                                <div class="moment-desc">Para voltar à mesa na hora certa.</div>
+                            </div>
+                        </div>
+                        <div class="moment-inputs">
+                            <div class="form-group">
+                                <label for="lunch_warning_advance_minutes">Aviso prévio</label>
+                                <input type="number" id="lunch_warning_advance_minutes" name="lunch_warning_advance_minutes" class="input-field" min="0" max="480">
+                            </div>
+                            <div class="form-group">
+                                <label for="lunch_warning_final_minutes">Aviso final</label>
+                                <input type="number" id="lunch_warning_final_minutes" name="lunch_warning_final_minutes" class="input-field" min="0" max="480">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="moment-row">
+                        <div class="moment-label">
+                            <span class="moment-icon">🏁</span>
+                            <div>
+                                <div class="moment-name">Fim da jornada</div>
+                                <div class="moment-desc">Para encerrar sem horas extras residuais.</div>
+                            </div>
+                        </div>
+                        <div class="moment-inputs">
+                            <div class="form-group">
+                                <label for="end_work_warning_advance_minutes">Aviso prévio</label>
+                                <input type="number" id="end_work_warning_advance_minutes" name="end_work_warning_advance_minutes" class="input-field" min="0" max="480">
+                            </div>
+                            <div class="form-group">
+                                <label for="end_work_warning_final_minutes">Aviso final</label>
+                                <input type="number" id="end_work_warning_final_minutes" name="end_work_warning_final_minutes" class="input-field" min="0" max="480">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="moment-row">
+                        <div class="moment-label">
+                            <span class="moment-icon">⚖️</span>
+                            <div>
+                                <div class="moment-name">Limite CLT contínuo</div>
+                                <div class="moment-desc">Antes de estourar o trabalho ininterrupto.</div>
+                            </div>
+                        </div>
+                        <div class="moment-inputs">
+                            <div class="form-group">
+                                <label for="continuous_work_warning_advance_minutes">Aviso prévio</label>
+                                <input type="number" id="continuous_work_warning_advance_minutes" name="continuous_work_warning_advance_minutes" class="input-field" min="0" max="480">
+                            </div>
+                            <div class="form-group">
+                                <label for="continuous_work_warning_final_minutes">Aviso final</label>
+                                <input type="number" id="continuous_work_warning_final_minutes" name="continuous_work_warning_final_minutes" class="input-field" min="0" max="480">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Canais -->
+                <section class="card settings-card">
+                    <div class="section-header">
+                        <div class="section-title-group">
+                            <h3>Canais de notificação</h3>
+                        </div>
+                    </div>
+
+                    <div class="channel-block">
+                        <label class="toggle-row">
+                            <input type="checkbox" id="telegram_enabled" name="telegram_enabled">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                            <span class="toggle-text">Telegram</span>
+                        </label>
+                        <div class="settings-grid channel-fields" data-for="telegram_enabled">
+                            <div class="form-group">
+                                <label for="telegram_bot_token">Bot token</label>
+                                <input type="password" id="telegram_bot_token" name="telegram_bot_token" class="input-field" placeholder="••••••••" autocomplete="off">
+                                <small>Criado com o @BotFather. Em branco mantém o token salvo.</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="telegram_chat_id">Chat ID</label>
+                                <input type="text" id="telegram_chat_id" name="telegram_chat_id" class="input-field" autocomplete="off">
+                            </div>
+                            <div class="form-group form-group-action">
+                                <button type="button" class="btn btn-outline btn-sm" data-test-channel="telegram">Enviar teste</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="channel-block">
+                        <label class="toggle-row">
+                            <input type="checkbox" id="slack_enabled" name="slack_enabled">
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                            <span class="toggle-text">Slack</span>
+                        </label>
+                        <div class="settings-grid channel-fields" data-for="slack_enabled">
+                            <div class="form-group span-2">
+                                <label for="slack_webhook_url">Incoming Webhook URL</label>
+                                <input type="password" id="slack_webhook_url" name="slack_webhook_url" class="input-field" placeholder="https://hooks.slack.com/services/..." autocomplete="off">
+                                <small>Em branco mantém o webhook salvo.</small>
+                            </div>
+                            <div class="form-group form-group-action">
+                                <button type="button" class="btn btn-outline btn-sm" data-test-channel="slack">Enviar teste</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Aplicativo -->
+                <section class="card settings-card">
+                    <div class="section-header">
+                        <div class="section-title-group">
+                            <h3>Aplicativo</h3>
+                        </div>
+                    </div>
+
+                    <div class="settings-grid">
+                        <div class="form-group">
+                            <label for="port">Porta do painel</label>
+                            <input type="number" id="port" name="port" class="input-field" min="1" max="65535">
+                            <small>Alterar exige reiniciar o app.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="poll_interval_seconds">Sincronização com o TiqueTaque (segundos)</label>
+                            <input type="number" id="poll_interval_seconds" name="poll_interval_seconds" class="input-field" min="30" max="3600" step="30">
+                        </div>
+                        <div class="form-group">
+                            <label for="alert_ticker_interval_seconds">Verificação local de alertas (segundos)</label>
+                            <input type="number" id="alert_ticker_interval_seconds" name="alert_ticker_interval_seconds" class="input-field" min="5" max="300" step="5">
+                        </div>
+                    </div>
+
+                    <label class="toggle-row">
+                        <input type="checkbox" id="open_browser_on_start" name="open_browser_on_start">
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        <span class="toggle-text">Abrir o painel automaticamente ao iniciar</span>
+                    </label>
+
+                    <label class="toggle-row">
+                        <input type="checkbox" id="autostart-toggle">
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        <span class="toggle-text">Iniciar junto com o sistema</span>
+                    </label>
+                    <p id="autostart-detail" class="settings-hint">Verificando...</p>
+
+                    <div class="paths-box">
+                        <div><span>Configuração:</span> <code id="config-path">—</code></div>
+                        <div><span>Dados:</span> <code id="data-path">—</code></div>
+                    </div>
+                </section>
+
+                <div id="env-warning" class="env-warning hidden"></div>
+
+                <div class="settings-actions">
+                    <button type="button" id="btn-reset" class="btn btn-secondary">Descartar alterações</button>
+                    <button type="submit" id="btn-save" class="btn btn-primary">Salvar configurações</button>
+                </div>
+            </form>
+        </main>
+
+        <footer class="app-footer">
+            <p>TiqueTaque Sync — Assistente Pessoal de Ponto &amp; Automação de Jornada</p>
+            <div class="footer-links">
+                <a href="/docs" target="_blank">Swagger API</a>
+                <span class="sep">•</span>
+                <a href="https://tiquetaque.app" target="_blank">TiqueTaque Oficial</a>
+            </div>
+        </footer>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/static/js/settings.js"></script>
+</body>
+</html>
