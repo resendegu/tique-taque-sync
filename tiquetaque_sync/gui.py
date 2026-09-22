@@ -21,7 +21,7 @@ import urllib.request
 import webbrowser
 from dataclasses import dataclass
 
-from . import autostart, paths, store, tray, updater
+from . import __version__, autostart, paths, store, tray, updater
 from .config import reload_settings, settings
 from .singleton import SingleInstance, focus_existing_window
 
@@ -200,10 +200,19 @@ class ControlPanel:
 
         header = tk.Frame(root, bg=BG)
         header.pack(fill="x", padx=20, pady=(18, 8))
+
+        title_row = tk.Frame(header, bg=BG)
+        title_row.pack(fill="x")
         tk.Label(
-            header, text="⏱  TiqueTaque Sync", bg=BG, fg=FG,
+            title_row, text="⏱  TiqueTaque Sync", bg=BG, fg=FG,
             font=("Segoe UI", 16, "bold"),
-        ).pack(anchor="w")
+        ).pack(side="left")
+        # Ao lado do título para ficar junto do aviso de atualização: dá para
+        # comparar "estou na 2.2.0" com "2.3.0 disponível" sem procurar.
+        tk.Label(
+            title_row, text=f"v{__version__}", bg=BG, fg=FG_MUTED,
+            font=("Segoe UI", 9),
+        ).pack(side="left", padx=(8, 0), pady=(8, 0))
         tk.Label(
             header, text="Monitor de jornada e notificações", bg=BG, fg=FG_MUTED,
             font=("Segoe UI", 9),
