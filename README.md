@@ -87,10 +87,6 @@ O mesmo `.exe` também serve de CLI, o que é útil para o autostart:
 > `%LOCALAPPDATA%\TiqueTaqueSync\data\tiquetaque-sync.log` — é o primeiro lugar para olhar
 > (e para anexar num relato de problema) se algo não subir.
 
-> 🪵 Como o executável roda sem console, ele grava um log em
-> `%LOCALAPPDATA%\TiqueTaqueSync\data	iquetaque-sync.log` — é o primeiro lugar para olhar
-> (e para anexar num relato de problema) se algo não subir.
-
 ### 1b. Qualquer sistema: instalar com pip
 
 ```bash
@@ -432,7 +428,7 @@ Dois workflows em [`.github/workflows/`](.github/workflows/):
 | -------- | ---------- | --------- |
 | [`ci.yml`](.github/workflows/ci.yml) | push na `main`, PRs | Roda a suíte em Python 3.11/3.12/3.13 e valida `pip install .` no Linux, Windows e macOS (entry points + arquivos de template empacotados) |
 | [`docker.yml`](.github/workflows/docker.yml) | push na `main`, tags `v*.*.*`, PRs que tocam a imagem | Builda `linux/amd64` + `linux/arm64` e publica em `ghcr.io/resendegu/tique-taque-sync` com proveniência e SBOM (em PR, só builda) |
-| [`release.yml`](.github/workflows/release.yml) | release publicada (ou manual) | Compila `TiqueTaqueSync.exe` com PyInstaller, sobe o app de verdade para validar painel/configurações/estáticos, gera o `.sha256` e anexa os dois aos assets da release |
+| [`release.yml`](.github/workflows/release.yml) | release publicada (ou manual) | Compila `TiqueTaqueSync.exe` com PyInstaller, sobe o app de verdade para validar painel/configurações/estáticos, gera o `.sha256`, anexa os dois aos assets e escreve nas notas da release as instruções de download e a mensagem do último commit |
 
 Para publicar uma versão:
 
@@ -445,8 +441,14 @@ Isso gera as tags `1.2.3`, `1.2`, `1` no GHCR. Ao **publicar a release** dessa t
 interface do GitHub, o `release.yml` compila o `.exe` e o anexa automaticamente aos assets
 — o usuário final baixa direto dali.
 
+As notas da release são completadas automaticamente com o passo a passo de download, o
+checksum, as alternativas (pip/Docker) e a mensagem do último commit. **O texto que você
+escrever à mão é preservado**: o bloco gerado entra abaixo de um marcador e é substituído,
+não duplicado, se o workflow rodar de novo.
+
 Para testar o empacotamento sem publicar nada, rode o workflow **Release** manualmente
 (*Actions → Release → Run workflow*): o `.exe` fica disponível como artefato da execução.
+Informando uma tag no campo do formulário, ele também anexa à release e reescreve as notas.
 
 O executável também pode ser gerado localmente no Windows:
 

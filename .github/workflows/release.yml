@@ -135,3 +135,85 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.release.tag_name || inputs.upload_to_release }}
         run: gh release upload "$env:TAG" dist/TiqueTaqueSync.exe dist/TiqueTaqueSync.exe.sha256 --clobber
+
+      # Acrescenta as instruções de download e a mensagem do commit ao corpo da
+      # release. O que a pessoa escreveu à mão é preservado: o bloco gerado fica
+      # abaixo de um marcador e é substituído (não duplicado) a cada re-execução.
+      - name: Escrever as instruções de download na release
+        if: github.event_name == 'release' || inputs.upload_to_release != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.upload_to_release }}
+          REPO: ${{ github.repository }}
+        run: |
+          $marker = "<!-- gerado automaticamente pelo workflow Release -->"
+
+          $commitMessage = (git log -1 --pretty=%B | Out-String).Trim()
+          $commitSha = (git rev-parse --short HEAD).Trim()
+          $sha256 = (Get-Content dist/TiqueTaqueSync.exe.sha256 -Raw).Split(" ")[0].Trim()
+          $exeUrl = "https://github.com/$env:REPO/releases/download/$env:TAG/TiqueTaqueSync.exe"
+
+          $generated = @"
+          $marker
+
+          ## ⬇️ Baixar e executar (Windows)
+
+          1. Baixe o [**TiqueTaqueSync.exe**]($exeUrl) em *Assets*, logo abaixo.
+          2. Execute o arquivo — não há instalador. A janela do app abre.
+          3. Clique em **Iniciar serviço** e depois em **Configurações** para informar
+             seu e-mail e o código de 4 dígitos do TiqueTaque.
+          4. Opcional: marque **Iniciar junto com o sistema** para ele subir sozinho no login.
+
+          > Como o executável não é assinado digitalmente, o Windows SmartScreen avisa
+          > "O Windows protegeu o computador" na primeira execução.
+          > Clique em **Mais informações → Executar assim mesmo**.
+
+          <details>
+          <summary>Conferir a integridade do download</summary>
+
+          ``````powershell
+          Get-FileHash .\TiqueTaqueSync.exe -Algorithm SHA256
+          ``````
+
+          Deve bater com:
+
+          ``````
+          $sha256
+          ``````
+          </details>
+
+          ## 🧰 Outras formas de instalar
+
+          ``````bash
+          # Qualquer sistema, via pip (inclui a CLI e a janela do app)
+          pip install git+https://github.com/${env:REPO}.git@${env:TAG}
+
+          # Servidor / homelab, via Docker (amd64 e arm64)
+          docker run -d --name tiquetaque-sync -p 8000:8000 ghcr.io/${env:REPO}:${env:TAG}
+          ``````
+
+          Instruções completas, incluindo Kubernetes, no [README](https://github.com/$env:REPO#readme).
+
+          ## 📝 Último commit ($commitSha)
+
+          ``````text
+          $commitMessage
+          ``````
+          "@
+
+          $existing = gh release view "$env:TAG" --json body --jq .body
+          if ($null -eq $existing) { $existing = "" }
+
+          # Se já rodamos antes, corta o bloco antigo e regera.
+          $index = $existing.IndexOf($marker)
+          if ($index -ge 0) { $existing = $existing.Substring(0, $index) }
+
+          $body = ($existing.TrimEnd() + "`n`n" + $generated).TrimStart()
+          # WriteAllText em vez de Out-File: garante UTF-8 sem BOM, que apareceria
+          # como caractere solto no topo das notas.
+          $notes = Join-Path (Get-Location) "release-notes.md"
+          [System.IO.File]::WriteAllText($notes, $body, (New-Object System.Text.UTF8Encoding $false))
+
+          gh release edit "$env:TAG" --notes-file $notes
+          Write-Host "Notas da release atualizadas para $env:TAG"

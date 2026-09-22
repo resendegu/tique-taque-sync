@@ -249,7 +249,7 @@ Workflows em `.github/workflows/`:
 |---|---|---|
 | `ci.yml` | push `main`, PR | Suíte de testes em Python 3.11/3.12/3.13 + `pip install .` em Linux/Windows/macOS, verificando entry points e arquivos de template empacotados |
 | `docker.yml` | push `main`, tag `v*.*.*`, PR que toca a imagem | Build multi-arch (`linux/amd64`, `linux/arm64`) e push para `ghcr.io/resendegu/tique-taque-sync`, com proveniência e SBOM |
-| `release.yml` | `release: published`, manual | Compila `TiqueTaqueSync.exe` (PyInstaller), roda smoke test real do executável, gera `.sha256` e anexa aos assets da release |
+| `release.yml` | `release: published`, manual | Compila `TiqueTaqueSync.exe` (PyInstaller), roda smoke test real do executável, gera `.sha256`, anexa aos assets e completa as notas da release |
 
 Regras:
 
@@ -293,6 +293,19 @@ que **abre a janela quando executado sem argumentos e age como CLI quando recebe
 6. **`multiprocessing.freeze_support()`** fica na primeira linha do entry point — sem ele um
    processo filho reabriria a janela.
 7. **Sem UPX** no `.spec`: compressão dispara falso-positivo de antivírus.
+
+### Notas da release
+
+O último passo do `release.yml` acrescenta ao corpo da release as instruções de download, o
+checksum, as alternativas de instalação e a mensagem do último commit. Duas invariantes:
+
+1. **Nunca sobrescrever o texto do mantenedor.** O bloco gerado fica abaixo de
+   `<!-- gerado automaticamente pelo workflow Release -->`; o que existe acima é preservado.
+2. **Idempotente.** Se o marcador já existe, o corpo é cortado nele e o bloco é regerado —
+   re-executar o workflow atualiza, não duplica.
+
+Detalhe de PowerShell: dentro do here-string `@"..."@` a crase é caractere de escape, então
+uma cerca de código Markdown precisa ser escrita com **seis** crases para produzir três.
 
 O executável não é assinado; o SmartScreen avisa na primeira execução. Isso está documentado
 no README junto do `.sha256` publicado. Se um dia houver certificado, assine no `release.yml`
