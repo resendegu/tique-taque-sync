@@ -1,5 +1,6 @@
 """Unit tests for the installable-app layer: paths, config store and autostart."""
 
+import importlib
 import json
 import os
 import socket
@@ -145,6 +146,30 @@ class TestGUI(unittest.TestCase):
                 continue
             with self.subTest(stage=stage):
                 self.assertIn(stage.value, STAGE_LABELS)
+
+
+class TestTrayIsImportableEverywhere(unittest.TestCase):
+    """`gui.py` importa `tray` incondicionalmente, e a suíte roda no Linux no CI.
+
+    O módulo usa `ctypes.WINFUNCTYPE` e `ctypes.wintypes`, que não existem fora
+    do Windows: se algo Win32 voltar para o nível do módulo, o import quebra em
+    qualquer plataforma que não seja Windows — foi assim que o CI caiu uma vez.
+    """
+
+    def _reload_as(self, platform: str):
+        with mock.patch.object(sys, "platform", platform):
+            return importlib.reload(importlib.import_module("tiquetaque_sync.tray"))
+
+    def test_module_imports_and_degrades_outside_windows(self):
+        try:
+            for platform in ("linux", "darwin"):
+                with self.subTest(platform=platform):
+                    module = self._reload_as(platform)
+                    self.assertFalse(module.IS_WINDOWS)
+                    self.assertIsNone(module.create("t", None, [], "show"))
+        finally:
+            # Devolve o módulo ao estado desta plataforma para os demais testes.
+            importlib.reload(importlib.import_module("tiquetaque_sync.tray"))
 
 
 class TestSingleInstance(unittest.TestCase):

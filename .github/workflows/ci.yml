@@ -66,6 +66,17 @@ jobs:
           tiquetaque-sync config path
           tiquetaque-sync autostart status
 
+      # A CLI importa a janela de forma preguiçosa (só dentro de `cmd_gui`),
+      # então os entry points acima passam mesmo com o import da GUI quebrado.
+      # Foi assim que um `ctypes.WINFUNCTYPE` no nível do módulo de `tray.py`
+      # chegou à release: quebrava em Linux e macOS, e nada aqui percebeu.
+      - name: Verificar que todo módulo importa nesta plataforma
+        run: >-
+          python -c "import tiquetaque_sync.gui, tiquetaque_sync.tray,
+          tiquetaque_sync.updater, tiquetaque_sync.singleton,
+          tiquetaque_sync.shortcut, tiquetaque_sync.main;
+          print('Todos os módulos importam em', __import__('sys').platform)"
+
       - name: Verificar arquivos empacotados
         shell: python {0}
         run: |
