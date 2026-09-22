@@ -47,12 +47,22 @@ class AutostartStatus:
 # ------------------------------------------------------------------------------
 # Launch command resolution
 # ------------------------------------------------------------------------------
+def is_frozen() -> bool:
+    """True quando rodando dentro do executável empacotado (PyInstaller)."""
+    return bool(getattr(sys, "frozen", False))
+
+
 def _launch_command(windowless: bool = False) -> list[str]:
     """Build the command line that starts the background service.
 
-    Prefers the console script created by ``pip install``; falls back to
-    ``python -m tiquetaque_sync`` when running from a source checkout.
+    Três cenários, nesta ordem:
+    1. Executável congelado (.exe): re-invoca a si mesmo com argumentos.
+    2. Instalado via pip: usa o console script do PATH.
+    3. Checkout do código-fonte: cai para ``python -m tiquetaque_sync``.
     """
+    if is_frozen():
+        return [sys.executable, "start", "--no-browser"]
+
     script_name = "tiquetaque-syncw" if windowless else "tiquetaque-sync"
     console_script = shutil.which(script_name)
     if console_script:
@@ -70,9 +80,10 @@ def _launch_workdir() -> str | None:
     """Working directory required by the ``python -m`` fallback.
 
     When the package is not installed (source checkout), the module is only
-    importable with the repository root as the working directory.
+    importable with the repository root as the working directory. O executável
+    congelado carrega tudo dentro de si, então não precisa de nada.
     """
-    if shutil.which("tiquetaque-sync") or shutil.which("tiquetaque-syncw"):
+    if is_frozen() or shutil.which("tiquetaque-sync") or shutil.which("tiquetaque-syncw"):
         return None
     return str(Path(__file__).resolve().parent.parent)
 

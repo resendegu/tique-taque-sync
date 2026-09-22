@@ -187,6 +187,11 @@ def cmd_shortcut(args: argparse.Namespace) -> int:
 # Setup wizard
 # ------------------------------------------------------------------------------
 def cmd_setup(args: argparse.Namespace) -> int:
+    # O .exe é compilado sem console: não há stdin para o assistente interativo.
+    if sys.stdin is None or sys.stdin.closed:
+        _say("O assistente interativo precisa de um terminal. Use a tela de configurações.")
+        return 1
+
     _say("⏱️  Configuração do TiqueTaque Sync")
     _say(f"    Arquivo: {paths.config_file()}")
     _say("    Enter mantém o valor atual.\n")

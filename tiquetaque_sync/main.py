@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime
@@ -26,7 +27,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("tiquetaque_sync")
 
-BASE_DIR = Path(__file__).resolve().parent
+def _base_dir() -> Path:
+    """Diretório que contém ``web/``.
+
+    Sob PyInstaller os módulos vivem no arquivo compactado e os dados são
+    extraídos para ``sys._MEIPASS`` — daí a necessidade do caso especial.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        return Path(bundle) / "tiquetaque_sync"
+    return Path(__file__).resolve().parent
+
+
+BASE_DIR = _base_dir()
 TEMPLATES_DIR = BASE_DIR / "web" / "templates"
 STATIC_DIR = BASE_DIR / "web" / "static"
 

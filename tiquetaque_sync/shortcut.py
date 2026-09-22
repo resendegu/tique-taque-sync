@@ -16,7 +16,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .autostart import DISPLAY_NAME, launch_workdir
+from .autostart import DISPLAY_NAME, is_frozen, launch_workdir
 
 UNIT_NAME = "tiquetaque-sync"
 
@@ -27,6 +27,10 @@ class ShortcutError(RuntimeError):
 
 def _gui_command() -> list[str]:
     """Comando que abre a janela sem console."""
+    if is_frozen():
+        # O .exe sem argumentos já abre a janela (ver cli.main_gui).
+        return [sys.executable]
+
     script = shutil.which("tiquetaque-sync-gui")
     if script:
         return [script]

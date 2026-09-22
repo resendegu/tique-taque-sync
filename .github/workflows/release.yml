@@ -1,0 +1,109 @@
+name: Release
+
+# Ao publicar uma release no GitHub, compila o executável do Windows e anexa
+# o arquivo aos assets, para o usuário baixar e rodar sem instalar Python.
+#
+# Também dá para rodar manualmente (workflow_dispatch) para testar o build sem
+# publicar nada: o .exe fica disponível como artefato da execução.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      upload_to_release:
+        description: "Tag da release onde anexar o .exe (vazio = só artefato)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  windows-exe:
+    name: Executável do Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write # necessário para anexar o asset à release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller==6.22.3
+
+      - name: Compilar TiqueTaqueSync.exe
+        run: pyinstaller packaging/tiquetaque-sync.spec --noconfirm --clean
+
+      # O .exe precisa servir o painel a partir dos arquivos embutidos: se os
+      # templates não forem empacotados, isto falha aqui e não no computador
+      # de quem baixou.
+      - name: Testar o executável
+        shell: pwsh
+        run: |
+          $env:TIQUETAQUE_SYNC_HOME = Join-Path $env:RUNNER_TEMP "ttq-smoke"
+          $proc = Start-Process -FilePath "dist\TiqueTaqueSync.exe" `
+            -ArgumentList "start", "--no-browser", "--port", "8790" -PassThru
+
+          try {
+            $ok = $false
+            foreach ($i in 1..30) {
+              Start-Sleep -Seconds 2
+              try {
+                $health = Invoke-RestMethod "http://127.0.0.1:8790/healthz" -TimeoutSec 5
+                if ($health.status -eq "ok") { $ok = $true; break }
+              } catch { }
+            }
+            if (-not $ok) { throw "O executável não respondeu em /healthz" }
+
+            $dashboard = Invoke-WebRequest "http://127.0.0.1:8790/" -TimeoutSec 10
+            if ($dashboard.Content -notmatch "Horas Trabalhadas Hoje") {
+              throw "O painel não renderizou (templates ausentes no pacote?)"
+            }
+
+            $settings = Invoke-WebRequest "http://127.0.0.1:8790/settings" -TimeoutSec 10
+            if ($settings.Content -notmatch "Quando quero ser avisado") {
+              throw "A tela de configurações não renderizou"
+            }
+
+            $css = Invoke-WebRequest "http://127.0.0.1:8790/static/css/settings.css" -TimeoutSec 10
+            if ($css.StatusCode -ne 200) { throw "Arquivos estáticos ausentes no pacote" }
+
+            Write-Host "Executável validado: painel, configurações e estáticos OK"
+          }
+          finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Get-Process TiqueTaqueSync -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+
+      - name: Gerar checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\TiqueTaqueSync.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  TiqueTaqueSync.exe" | Out-File -FilePath dist\TiqueTaqueSync.exe.sha256 -Encoding ascii
+          Write-Host "SHA256: $hash"
+
+      - name: Publicar como artefato da execução
+        uses: actions/upload-artifact@v4
+        with:
+          name: TiqueTaqueSync-windows
+          path: |
+            dist/TiqueTaqueSync.exe
+            dist/TiqueTaqueSync.exe.sha256
+          if-no-files-found: error
+
+      - name: Anexar à release
+        if: github.event_name == 'release' || inputs.upload_to_release != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name || inputs.upload_to_release }}
+        run: gh release upload "$env:TAG" dist/TiqueTaqueSync.exe dist/TiqueTaqueSync.exe.sha256 --clobber

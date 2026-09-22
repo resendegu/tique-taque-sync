@@ -52,6 +52,12 @@ tiquetaque_sync/
     ├── templates/index.html    # Painel em Dark Glassmorphism
     ├── templates/settings.html # Tela de configurações
     └── static/                 # CSS tokens/animations e JavaScript
+
+packaging/
+├── entry.py                # Entry point do executável congelado
+├── tiquetaque-sync.spec    # Receita do PyInstaller
+├── make_icon.py            # Gera icon.ico (só stdlib) — rode se o desenho mudar
+└── icon.ico                # Ícone versionado do .exe
 ```
 
 ### 2.1. Entry points (`pyproject.toml`)
@@ -243,6 +249,7 @@ Workflows em `.github/workflows/`:
 |---|---|---|
 | `ci.yml` | push `main`, PR | Suíte de testes em Python 3.11/3.12/3.13 + `pip install .` em Linux/Windows/macOS, verificando entry points e arquivos de template empacotados |
 | `docker.yml` | push `main`, tag `v*.*.*`, PR que toca a imagem | Build multi-arch (`linux/amd64`, `linux/arm64`) e push para `ghcr.io/resendegu/tique-taque-sync`, com proveniência e SBOM |
+| `release.yml` | `release: published`, manual | Compila `TiqueTaqueSync.exe` (PyInstaller), roda smoke test real do executável, gera `.sha256` e anexa aos assets da release |
 
 Regras:
 
@@ -257,7 +264,48 @@ Os manifests em `k8s/` já apontam para a imagem publicada. `kustomization.yaml`
 
 ---
 
-## 🛠️ 12. Comandos e Runbooks de Desenvolvimento
+## 🪟 12. Executável Windows (PyInstaller)
+
+`packaging/tiquetaque-sync.spec` gera `dist/TiqueTaqueSync.exe`: arquivo único, sem console,
+que **abre a janela quando executado sem argumentos e age como CLI quando recebe argumentos**
+(`packaging/entry.py` → `cli.main_gui`).
+
+### Armadilhas do modo congelado — não regrida nestes pontos
+
+1. **`sys.executable` deixa de ser o Python.** Por isso `autostart._launch_command()` e
+   `shortcut._gui_command()` checam `autostart.is_frozen()` e devolvem `[sys.executable, ...]`,
+   fazendo o .exe se re-invocar. Qualquer código novo que queira subir o serviço deve usar
+   `autostart.launch_command()`, nunca montar `python -m ...` na mão.
+2. **`python -m tiquetaque_sync` não existe dentro do .exe** — e por isso `_launch_workdir()`
+   devolve `None` quando congelado (não há checkout para apontar).
+3. **Os templates não ficam ao lado do módulo.** `main._base_dir()` usa `sys._MEIPASS` quando
+   congelado. Ao mover arquivos de `web/`, ajuste também `datas` no `.spec`.
+4. **uvicorn e apscheduler importam por nome em runtime**; o `.spec` os inclui via
+   `collect_submodules`. Dependência nova que faça import dinâmico precisa entrar em
+   `hiddenimports`, senão o .exe compila e quebra só em execução.
+5. **Sem console, não há `stdin` nem `stdout`.** `_say()` tolera `sys.stdout` nulo e
+   `cmd_setup` recusa rodar sem `stdin`. Não introduza `input()` fora do assistente.
+6. **`multiprocessing.freeze_support()`** fica na primeira linha do entry point — sem ele um
+   processo filho reabriria a janela.
+7. **Sem UPX** no `.spec`: compressão dispara falso-positivo de antivírus.
+
+O executável não é assinado; o SmartScreen avisa na primeira execução. Isso está documentado
+no README junto do `.sha256` publicado. Se um dia houver certificado, assine no `release.yml`
+entre o build e o upload.
+
+### Gerar localmente (Windows)
+```bash
+pip install pyinstaller
+pyinstaller packaging/tiquetaque-sync.spec --noconfirm
+```
+
+O smoke test do `release.yml` sobe o .exe de verdade e checa `/healthz`, o painel, a tela de
+configurações e um arquivo estático — é a rede de proteção contra "compilou mas não renderiza".
+Mantenha-o ao adicionar telas novas.
+
+---
+
+## 🛠️ 13. Comandos e Runbooks de Desenvolvimento
 
 ### Instalar em modo editável
 ```bash

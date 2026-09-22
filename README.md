@@ -16,6 +16,11 @@
 
 ## ⚡ Início rápido
 
+**No Windows, sem instalar nada:** baixe o `TiqueTaqueSync.exe` na
+[última release](https://github.com/resendegu/tique-taque-sync/releases/latest) e execute.
+
+**Com Python (qualquer sistema):**
+
 ```bash
 pip install git+https://github.com/resendegu/tique-taque-sync.git
 tiquetaque-sync setup      # pergunta credenciais, canais e cria o atalho
@@ -61,7 +66,24 @@ O **TiqueTaque Sync** automatiza tudo isso:
 > Quer rodar num servidor em vez do seu computador? Veja [Docker](#-opção-2--docker-servidor-nas-homelab)
 > e [Kubernetes](#-opção-3--kubernetes-cluster-pessoal) mais abaixo.
 
-### 1a. Instalar
+### 1a. Windows: baixar o executável (sem instalar Python)
+
+Baixe **`TiqueTaqueSync.exe`** na [página de releases](https://github.com/resendegu/tique-taque-sync/releases/latest)
+e execute. É um arquivo único, sem instalador: a janela do app abre, você clica em
+**Iniciar serviço** e depois em **Configurações** para informar suas credenciais.
+
+> ⚠️ Por não ser assinado digitalmente, o Windows SmartScreen mostra
+> "O Windows protegeu o computador". Clique em **Mais informações → Executar assim mesmo**.
+> Se preferir conferir a integridade antes, cada release traz um `TiqueTaqueSync.exe.sha256`:
+>
+> ```powershell
+> Get-FileHash .\TiqueTaqueSync.exe -Algorithm SHA256
+> ```
+
+O mesmo `.exe` também serve de CLI, o que é útil para o autostart:
+`TiqueTaqueSync.exe start --no-browser`.
+
+### 1b. Qualquer sistema: instalar com pip
 
 ```bash
 pip install git+https://github.com/resendegu/tique-taque-sync.git
@@ -89,7 +111,7 @@ Isso disponibiliza no PATH:
 > 🐧 **Linux:** algumas distribuições empacotam o Tkinter separado. Se a janela não abrir,
 > instale-o (`sudo apt install python3-tk`) — a CLI e o painel web funcionam sem ele.
 
-### 1b. Alternativa: rodar direto do código-fonte
+### 1c. Alternativa: rodar direto do código-fonte
 
 ```bash
 python -m venv .venv
@@ -402,6 +424,7 @@ Dois workflows em [`.github/workflows/`](.github/workflows/):
 | -------- | ---------- | --------- |
 | [`ci.yml`](.github/workflows/ci.yml) | push na `main`, PRs | Roda a suíte em Python 3.11/3.12/3.13 e valida `pip install .` no Linux, Windows e macOS (entry points + arquivos de template empacotados) |
 | [`docker.yml`](.github/workflows/docker.yml) | push na `main`, tags `v*.*.*`, PRs que tocam a imagem | Builda `linux/amd64` + `linux/arm64` e publica em `ghcr.io/resendegu/tique-taque-sync` com proveniência e SBOM (em PR, só builda) |
+| [`release.yml`](.github/workflows/release.yml) | release publicada (ou manual) | Compila `TiqueTaqueSync.exe` com PyInstaller, sobe o app de verdade para validar painel/configurações/estáticos, gera o `.sha256` e anexa os dois aos assets da release |
 
 Para publicar uma versão:
 
@@ -410,7 +433,19 @@ git tag v1.2.3
 git push origin v1.2.3
 ```
 
-Isso gera as tags `1.2.3`, `1.2`, `1` no GHCR.
+Isso gera as tags `1.2.3`, `1.2`, `1` no GHCR. Ao **publicar a release** dessa tag na
+interface do GitHub, o `release.yml` compila o `.exe` e o anexa automaticamente aos assets
+— o usuário final baixa direto dali.
+
+Para testar o empacotamento sem publicar nada, rode o workflow **Release** manualmente
+(*Actions → Release → Run workflow*): o `.exe` fica disponível como artefato da execução.
+
+O executável também pode ser gerado localmente no Windows:
+
+```bash
+pip install pyinstaller
+pyinstaller packaging/tiquetaque-sync.spec --noconfirm
+```
 
 > 📦 **Primeira publicação:** pacotes no GHCR nascem privados. Depois do primeiro build,
 > abra o pacote em *Packages → tique-taque-sync → Package settings* e mude a visibilidade

@@ -2,8 +2,10 @@
 
 import json
 import os
+import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests import _bootstrap  # noqa: F401  (isolates config/data before imports)
 
@@ -100,6 +102,21 @@ class TestShortcut(unittest.TestCase):
                     str(target).lower().startswith(home)
                     or str(target).lower().startswith(str(Path(os.environ.get("APPDATA", home))).lower())
                 )
+
+
+class TestFrozenMode(unittest.TestCase):
+    """Dentro do .exe não há interpretador Python para re-invocar."""
+
+    def test_service_command_reinvokes_the_executable(self):
+        with mock.patch.object(sys, "frozen", True, create=True):
+            command = autostart._launch_command(windowless=True)
+            self.assertEqual(command, [sys.executable, "start", "--no-browser"])
+            # Nada de cwd: o pacote viaja dentro do próprio executável.
+            self.assertIsNone(autostart._launch_workdir())
+
+    def test_shortcut_points_at_the_executable(self):
+        with mock.patch.object(sys, "frozen", True, create=True):
+            self.assertEqual(shortcut._gui_command(), [sys.executable])
 
 
 class TestGUI(unittest.TestCase):
