@@ -83,6 +83,14 @@ e execute. É um arquivo único, sem instalador: a janela do app abre, você cli
 O mesmo `.exe` também serve de CLI, o que é útil para o autostart:
 `TiqueTaqueSync.exe start --no-browser`.
 
+> 🪵 Como o executável roda sem console, ele grava um log em
+> `%LOCALAPPDATA%\TiqueTaqueSync\data\tiquetaque-sync.log` — é o primeiro lugar para olhar
+> (e para anexar num relato de problema) se algo não subir.
+
+> 🪵 Como o executável roda sem console, ele grava um log em
+> `%LOCALAPPDATA%\TiqueTaqueSync\data	iquetaque-sync.log` — é o primeiro lugar para olhar
+> (e para anexar num relato de problema) se algo não subir.
+
 ### 1b. Qualquer sistema: instalar com pip
 
 ```bash

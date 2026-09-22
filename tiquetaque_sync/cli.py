@@ -9,8 +9,10 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 import asyncio
 import json
+import os
 import socket
 import sys
 import threading
@@ -28,6 +30,40 @@ APP_VERSION = "2.0.0"
 # ------------------------------------------------------------------------------
 # Small console helpers
 # ------------------------------------------------------------------------------
+def log_path() -> pathlib.Path:
+    """Arquivo de log do executável — o único lugar onde ele pode se explicar."""
+    return settings.data_dir / "tiquetaque-sync.log"
+
+
+def _attach_log_sink() -> None:
+    """Redireciona stdout/stderr para um arquivo quando rodando congelado.
+
+    O .exe é compilado sem console (subsistema GUI do Windows): quando ninguém
+    redireciona a saída, `sys.stdout` e `sys.stderr` não têm para onde escrever
+    e a configuração de logging do uvicorn falha *antes* do servidor abrir a
+    porta. O sintoma é cruel: processo vivo, nada escutando, nenhuma mensagem.
+
+    Escrever num arquivo resolve e ainda dá ao usuário algo para anexar num
+    relato de bug.
+    """
+    sink = None
+    try:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Rotação pobre, porém suficiente: o log é diagnóstico, não auditoria.
+        if path.exists() and path.stat().st_size > 5_000_000:
+            path.unlink()
+        sink = open(path, "a", encoding="utf-8", errors="replace", buffering=1)
+    except OSError:
+        try:
+            sink = open(os.devnull, "w", encoding="utf-8")
+        except OSError:
+            return
+
+    sys.stdout = sink
+    sys.stderr = sink
+
+
 def _use_utf8_console() -> None:
     """Best-effort UTF-8 console so the emojis below never crash on Windows cp1252."""
     for stream in (sys.stdout, sys.stderr):
@@ -390,6 +426,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if autostart.is_frozen():
+        _attach_log_sink()
     _use_utf8_console()
     parser = build_parser()
     argv = list(sys.argv[1:] if argv is None else argv)

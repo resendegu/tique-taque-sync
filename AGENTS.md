@@ -283,8 +283,13 @@ que **abre a janela quando executado sem argumentos e age como CLI quando recebe
 4. **uvicorn e apscheduler importam por nome em runtime**; o `.spec` os inclui via
    `collect_submodules`. Dependência nova que faça import dinâmico precisa entrar em
    `hiddenimports`, senão o .exe compila e quebra só em execução.
-5. **Sem console, não há `stdin` nem `stdout`.** `_say()` tolera `sys.stdout` nulo e
-   `cmd_setup` recusa rodar sem `stdin`. Não introduza `input()` fora do assistente.
+5. **Sem console, não há `stdin` nem `stdout` — e isso mata o servidor.** Quando ninguém
+   redireciona a saída (duplo clique, ou o filho lançado pela janela), a configuração de
+   logging do uvicorn falha *antes* do bind: processo vivo, porta fechada, nenhuma mensagem.
+   Por isso `cli.main()` chama `_attach_log_sink()` quando congelado, mandando stdout/stderr
+   para `<data_dir>/tiquetaque-sync.log`. **Não remova isso**, e não teste o .exe só com a
+   saída redirecionada — mascara exatamente essa falha. `cmd_setup` recusa rodar sem `stdin`;
+   não introduza `input()` fora do assistente.
 6. **`multiprocessing.freeze_support()`** fica na primeira linha do entry point — sem ele um
    processo filho reabriria a janela.
 7. **Sem UPX** no `.spec`: compressão dispara falso-positivo de antivírus.
@@ -299,9 +304,10 @@ pip install pyinstaller
 pyinstaller packaging/tiquetaque-sync.spec --noconfirm
 ```
 
-O smoke test do `release.yml` sobe o .exe de verdade e checa `/healthz`, o painel, a tela de
-configurações e um arquivo estático — é a rede de proteção contra "compilou mas não renderiza".
-Mantenha-o ao adicionar telas novas.
+O smoke test do `release.yml` sobe o .exe de verdade, **sem redirecionar a saída**, e checa
+`/healthz`, o painel, a tela de configurações e um arquivo estático — é a rede de proteção
+contra "compilou mas não renderiza" e contra a regressão do item 5. Em caso de falha ele
+imprime o código de saída e o final do log do app. Mantenha-o ao adicionar telas novas.
 
 ---
 
