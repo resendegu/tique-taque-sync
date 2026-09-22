@@ -43,11 +43,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # A versão do projeto mora em [project].version do pyproject.toml. Alterar
+  # A versão do projeto mora em __version__ (tiquetaque_sync/__init__.py) —
   # aquela linha é o que declara uma release: aqui ela é comparada com o commit
   # anterior para decidir se a imagem ganha tags de versão.
   version:
-    name: Versão do pyproject
+    name: Versão do pacote
     runs-on: ubuntu-latest
     outputs:
       # `|| 'false'` cobre os casos em que o passo nem roda (PR, push de tag).
@@ -67,10 +67,10 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          if git show HEAD^:pyproject.toml > /tmp/previous.toml 2>/dev/null; then
-            python scripts/version_bump.py --current pyproject.toml --previous /tmp/previous.toml
+          if git show HEAD^:tiquetaque_sync/__init__.py > /tmp/previous.py 2>/dev/null; then
+            python scripts/version_bump.py --current tiquetaque_sync/__init__.py --previous /tmp/previous.py
           else
-            python scripts/version_bump.py --current pyproject.toml
+            python scripts/version_bump.py --current tiquetaque_sync/__init__.py
           fi
 
   build:

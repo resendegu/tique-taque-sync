@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tiquetaque-sync"
-version = "2.1.1"
+dynamic = ["version"]
 description = "Monitor de jornada TiqueTaque: painel web local, notificações no Slack/Telegram e autostart com o sistema"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,6 +43,12 @@ tiquetaque-sync-gui = "tiquetaque_sync.cli:main_gui"
 [project.urls]
 Homepage = "https://github.com/resendegu/tique-taque-sync"
 Issues = "https://github.com/resendegu/tique-taque-sync/issues"
+
+[tool.setuptools.dynamic]
+# Fonte única da versão. Antes havia um literal aqui e outro no __init__.py, e
+# eles divergiram na v2.1.1: o app publicado se identificava com a versão
+# anterior, e o auto-updater reoferecia a mesma atualização sem parar.
+version = { attr = "tiquetaque_sync.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["tiquetaque_sync*"]

@@ -101,7 +101,11 @@ def probe_service() -> ServiceState:
 def _spawn_service() -> subprocess.Popen:
     """Sobe `tiquetaque-sync start --no-browser` como processo filho."""
     command = autostart.launch_command(windowless=True)
-    kwargs: dict = {"cwd": autostart.launch_workdir()}
+    # Sem `env` limpo, o filho reusa a pasta _MEI do pai e morre quando o pai sai.
+    kwargs: dict = {
+        "cwd": autostart.launch_workdir(),
+        "env": autostart.child_environment(),
+    }
 
     if sys.platform == "win32":
         # CREATE_NO_WINDOW evita o flash de console preto.
@@ -593,6 +597,7 @@ class ControlPanel:
 
         try:
             kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+            kwargs["env"] = autostart.child_environment()
             subprocess.Popen([sys.executable, "gui"], **kwargs)
         except OSError as exc:
             self.messagebox.showerror(

@@ -52,6 +52,30 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
+def child_environment() -> dict[str, str]:
+    """Ambiente para lançar uma cópia deste app como processo independente.
+
+    O bootloader do PyInstaller marca o ambiente com `_PYI_APPLICATION_HOME_DIR`
+    (a pasta `_MEIxxxx` já extraída), `_PYI_ARCHIVE_FILE` e
+    `_PYI_PARENT_PROCESS_LEVEL`. Um filho que herda essas variáveis **não**
+    extrai a própria cópia: ele reaproveita a do pai. Quando o pai termina, o
+    bootloader apaga aquela pasta — e o filho perde Tcl, `_multiprocessing` e o
+    resto do runtime no meio da execução.
+
+    Sintomas já vistos por causa disso: `ModuleNotFoundError: No module named
+    '_multiprocessing'`, `Can't find a usable init.tcl` e
+    `Failed to remove temporary directory: ..._MEIxxxxx`.
+
+    Portanto: **todo** `Popen` que lance este próprio executável precisa passar
+    `env=child_environment()`.
+    """
+    env = dict(os.environ)
+    for name in list(env):
+        if name.startswith("_PYI") or name == "_MEIPASS2":
+            del env[name]
+    return env
+
+
 def _autostart_arguments() -> list[str]:
     """O que o login do usuário dispara.
 

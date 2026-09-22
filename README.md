@@ -487,13 +487,11 @@ Dois workflows em [`.github/workflows/`](.github/workflows/):
 
 ### Como publicar uma versão
 
-Não crie a tag à mão: **suba a versão em `[project].version` do `pyproject.toml`** e faça
-push para a `main`.
+Não crie a tag à mão: **suba `__version__` em `tiquetaque_sync/__init__.py`** e faça push
+para a `main`. Essa é a fonte única da versão — o `pyproject.toml` a deriva.
 
-```toml
-[project]
-name = "tiquetaque-sync"
-version = "2.1.0"   # <- alterar esta linha é o que publica uma release
+```python
+__version__ = "2.1.2"   # <- alterar esta linha é o que publica uma release
 ```
 
 O CI compila e testa o `.exe`, cria a tag `v2.1.0`, abre a release com o executável e o

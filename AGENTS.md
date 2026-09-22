@@ -5,9 +5,10 @@
 
 > ### ⚠️ Antes de encerrar qualquer alteração de comportamento
 >
-> **Suba `[project].version` no `pyproject.toml`.** Aquela linha é o gatilho da release: se
-> ela não mudar, nenhuma versão é publicada — nem o `.exe` para quem baixa da página de
-> releases, nem a imagem versionada para quem usa Docker. MAJOR quebra compatibilidade,
+> **Suba `__version__` em `tiquetaque_sync/__init__.py`.** Aquela linha é o gatilho da
+> release *e* a fonte única da versão (o `pyproject.toml` a deriva via `dynamic`). Se ela não
+> mudar, nenhuma versão é publicada — nem o `.exe` para quem baixa da página de releases, nem
+> a imagem versionada para quem usa Docker. MAJOR quebra compatibilidade,
 > MINOR adiciona função compatível, PATCH corrige mantendo compatibilidade. Detalhes na
 > seção sobre versionamento.
 
@@ -335,10 +336,14 @@ está em uso. Não mova essa chamada para depois.
 
 ## 🔖 12. Versionamento: a linha que dispara a release
 
-**Toda alteração de comportamento sobe a versão em `[project].version` do `pyproject.toml`
-— e em `tiquetaque_sync/__init__.py`, que precisa bater com ela** (há teste garantindo).
-O `__version__` é o que o auto-updater compara com a release publicada: se ficar para trás,
-o app se acha desatualizado para sempre e rebaixa a mesma versão em loop.
+**Toda alteração de comportamento sobe `__version__` em `tiquetaque_sync/__init__.py`.**
+Essa é a **fonte única**: o `pyproject.toml` declara `dynamic = ["version"]` e a lê de lá, e
+o `packaging/version_info.py` (recurso VERSIONINFO do `.exe`) também.
+
+Houve um literal em cada arquivo até a v2.1.1, e eles divergiram: o app publicado se
+identificava como 2.1.0, então o auto-updater via a 2.1.1 como nova, instalava, e reoferecia
+a mesma atualização sem parar. A release quebrada foi removida do GitHub e a fonte passou a
+ser única — há teste garantindo que o pyproject não volte a ter versão literal.
 Quando aquela linha muda num push para a `main`, o CI:
 
 1. compila e testa o `TiqueTaqueSync.exe`;
@@ -433,12 +438,21 @@ que **abre a janela quando executado sem argumentos e age como CLI quando recebe
    `tray._declare_prototypes()` existe para isso. Outra pegadinha: com
    `restype=c_void_p`, `DefWindowProcW` devolve `None` no lugar de zero, e devolver `None`
    de um callback declarado como inteiro derruba o WNDPROC — daí o `or 0`.
-8. **O `.spec` produz dois formatos.** Sem variável de ambiente sai o arquivo único; com
+8. **Filho do app congelado precisa de ambiente limpo.** O bootloader marca o ambiente com
+   `_PYI_APPLICATION_HOME_DIR` (a pasta `_MEIxxxx` extraída), `_PYI_ARCHIVE_FILE` e
+   `_PYI_PARENT_PROCESS_LEVEL`. Um filho que herda essas variáveis **não extrai a própria
+   cópia** — reusa a do pai; quando o pai sai, o bootloader apaga a pasta e o filho perde Tcl
+   e `_multiprocessing` no meio da execução (`ModuleNotFoundError: No module named
+   '_multiprocessing'`, `Can't find a usable init.tcl`, `Failed to remove temporary
+   directory`). **Todo `subprocess.Popen` que lance este executável passa
+   `env=autostart.child_environment()`** — há teste varrendo `gui.py` e `updater.py` para
+   garantir que nenhuma chamada esqueça.
+9. **O `.spec` produz dois formatos.** Sem variável de ambiente sai o arquivo único; com
    `TTQ_ONEDIR=1` sai a versão em pasta (`COLLECT`). A release publica os dois, porque o
    modo arquivo único se descompacta em `%TEMP%` a cada execução e isso é gatilho de
    heurística de antivírus. Ao mexer em `datas`/`hiddenimports`, lembre que os dois modos
    compartilham o mesmo `Analysis` — teste os dois.
-9. **O recurso VERSIONINFO não é enfeite.** `packaging/version_info.py` gera os campos
+10. **O recurso VERSIONINFO não é enfeite.** `packaging/version_info.py` gera os campos
    (empresa, produto, versão, descrição) a partir do `pyproject.toml`, e o `.spec` embute
    via `version=`. Binário sem esses campos pontua mal em antivírus baseado em ML. Não
    remova, e não versione o `version_info.txt` — ele é derivado.

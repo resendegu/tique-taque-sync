@@ -6,12 +6,12 @@ compilador. Motores de antivírus baseados em aprendizado de máquina usam essa
 ausência como sinal, então preencher os campos reduz falso-positivo (não
 elimina: só assinatura digital resolve de fato).
 
-O conteúdo é derivado da versão do pyproject.toml, para nunca divergir dela.
+O conteúdo é derivado do `__version__` do pacote (a fonte única de versão).
 """
 
 from __future__ import annotations
 
-import tomllib
+import re
 from pathlib import Path
 
 COMPANY = "Gustavo Resende"
@@ -52,9 +52,20 @@ VSVersionInfo(
 """
 
 
-def project_version(pyproject: Path) -> str:
-    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    return str(data["project"]["version"])
+VERSION_ATTR = re.compile(r"""^__version__\s*=\s*["'](?P<version>[^"']+)["']""", re.M)
+
+
+def project_version(repo_root: Path) -> str:
+    """Lê a versão da fonte única: `__version__` do pacote.
+
+    O `pyproject.toml` a deriva via `dynamic`, então não há versão estática lá
+    para ler — ler de lá quebrava o build com `KeyError: 'version'`.
+    """
+    init = repo_root / "tiquetaque_sync" / "__init__.py"
+    match = VERSION_ATTR.search(init.read_text(encoding="utf-8"))
+    if match is None:
+        raise SystemExit(f"{init} não define __version__")
+    return match["version"]
 
 
 def version_tuple(version: str) -> tuple[int, int, int, int]:
@@ -79,7 +90,7 @@ def render(version: str) -> str:
 
 
 def write(repo_root: Path, destination: Path) -> Path:
-    version = project_version(repo_root / "pyproject.toml")
+    version = project_version(repo_root)
     destination.write_text(render(version), encoding="utf-8")
     return destination
 

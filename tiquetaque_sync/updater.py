@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
-from .autostart import is_frozen
+from .autostart import child_environment, is_frozen
 from .config import settings
 
 logger = logging.getLogger(__name__)
@@ -274,7 +274,7 @@ def apply_pending_update(relaunch: bool = True) -> bool:
 
     if relaunch:
         try:
-            kwargs = {}
+            kwargs = {"env": child_environment()}
             if sys.platform == "win32":
                 kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
             subprocess.Popen([str(target), *sys.argv[1:]], **kwargs)

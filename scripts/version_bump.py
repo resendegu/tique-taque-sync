@@ -33,12 +33,29 @@ SEMVER = re.compile(
 )
 
 
+VERSION_ATTR = re.compile(r"""^__version__\s*=\s*["'](?P<version>[^"']+)["']""", re.M)
+
+
 def read_version(path: Path) -> str | None:
-    """Lê project.version de um pyproject.toml; None se o arquivo não existir."""
+    """Lê a versão de um `__init__.py` (`__version__`) ou de um `pyproject.toml`.
+
+    A fonte única do projeto é o `__version__` do pacote; o pyproject a deriva
+    via `dynamic`. O suporte a TOML fica aqui só para repositórios que ainda
+    declarem a versão lá.
+    """
     if not path.exists():
         return None
+
+    text = path.read_text(encoding="utf-8")
+
+    if path.suffix == ".py":
+        match = VERSION_ATTR.search(text)
+        if match is None:
+            sys.exit(f"::error::{path} não define __version__")
+        return match["version"]
+
     try:
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
         sys.exit(f"::error::{path} não é um TOML válido: {exc}")
     version = data.get("project", {}).get("version")

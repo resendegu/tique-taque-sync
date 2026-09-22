@@ -1,6 +1,6 @@
 name: Release
 
-# Caminho principal: subir `[project].version` no pyproject.toml e dar push na
+# Caminho principal: subir `__version__` em tiquetaque_sync/__init__.py e dar push na
 # main. Isso compila o executável do Windows, cria a tag `vX.Y.Z`, abre a
 # release e anexa o .exe — nenhuma tag precisa ser criada à mão.
 #
@@ -10,7 +10,7 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: ["pyproject.toml"]
+    paths: ["tiquetaque_sync/__init__.py"]
   release:
     types: [published]
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
   # Decide se este run publica uma versão e qual é a tag envolvida. Centralizar
   # aqui evita repetir a lógica dos três gatilhos em cada passo do job pesado.
   version:
-    name: Versão do pyproject
+    name: Versão do pacote
     runs-on: ubuntu-latest
     outputs:
       build: ${{ steps.decide.outputs.build }}
@@ -47,10 +47,10 @@ jobs:
         if: github.event_name == 'push'
         run: |
           set -euo pipefail
-          if git show HEAD^:pyproject.toml > /tmp/previous.toml 2>/dev/null; then
-            python scripts/version_bump.py --current pyproject.toml --previous /tmp/previous.toml
+          if git show HEAD^:tiquetaque_sync/__init__.py > /tmp/previous.py 2>/dev/null; then
+            python scripts/version_bump.py --current tiquetaque_sync/__init__.py --previous /tmp/previous.py
           else
-            python scripts/version_bump.py --current pyproject.toml
+            python scripts/version_bump.py --current tiquetaque_sync/__init__.py
           fi
 
       - name: Decidir o que este run faz

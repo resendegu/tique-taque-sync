@@ -231,23 +231,86 @@ class TestAppIcon(unittest.TestCase):
                 self.assertIn(name, handled)
 
 
-class TestVersionIsConsistent(unittest.TestCase):
-    """O updater compara a versão do pacote com a da release.
+class TestChildEnvironment(unittest.TestCase):
+    """O filho precisa extrair a própria cópia do runtime, não reusar a do pai.
 
-    Se `__version__` ficar para trás do pyproject.toml, o app se acharia
-    desatualizado para sempre e rebaixaria a mesma versão em loop.
+    Herdando `_PYI_APPLICATION_HOME_DIR`, o processo filho aponta para a pasta
+    `_MEIxxxx` do pai; quando o pai sai, o bootloader apaga essa pasta e o filho
+    perde Tcl e `_multiprocessing` no meio da execução.
     """
 
-    def test_package_version_matches_pyproject(self):
+    VARIAVEIS = (
+        "_PYI_APPLICATION_HOME_DIR",
+        "_PYI_ARCHIVE_FILE",
+        "_PYI_PARENT_PROCESS_LEVEL",
+        "_MEIPASS2",
+    )
+
+    def test_pyinstaller_markers_are_stripped(self):
+        poluido = {name: "valor" for name in self.VARIAVEIS}
+        with mock.patch.dict(os.environ, poluido):
+            env = autostart.child_environment()
+        for name in self.VARIAVEIS:
+            with self.subTest(variavel=name):
+                self.assertNotIn(name, env)
+
+    def test_rest_of_the_environment_survives(self):
+        with mock.patch.dict(os.environ, {"TTQ_MARCADOR": "preservar"}):
+            env = autostart.child_environment()
+        self.assertEqual(env.get("TTQ_MARCADOR"), "preservar")
+        self.assertIn("PATH", env)
+
+    def test_every_self_spawn_uses_it(self):
+        """Garante que nenhum `Popen` do próprio app esqueça o `env`."""
+        raiz = Path(__file__).resolve().parent.parent / "tiquetaque_sync"
+        for arquivo in ("gui.py", "updater.py"):
+            texto = (raiz / arquivo).read_text(encoding="utf-8")
+            for trecho in texto.split("subprocess.Popen(")[1:]:
+                with self.subTest(arquivo=arquivo):
+                    # O `env` pode estar no literal da chamada ou no dict kwargs
+                    # montado logo acima; ambos aparecem na vizinhança.
+                    contexto = texto[: texto.index(trecho)][-400:] + trecho[:200]
+                    self.assertIn("child_environment()", contexto)
+
+
+class TestVersionHasASingleSource(unittest.TestCase):
+    """A versão vive só no `__version__`; o pyproject a deriva.
+
+    Antes havia um literal em cada arquivo e eles divergiram na v2.1.1: o app
+    publicado se identificava como 2.1.0, então o auto-updater reoferecia a
+    mesma atualização sem parar.
+    """
+
+    def setUp(self):
         import tomllib
 
         pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
-        declared = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
-        self.assertEqual(
-            __version__,
-            declared,
-            "tiquetaque_sync.__version__ divergiu de [project].version",
+        self.data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+
+    def test_pyproject_declares_no_literal_version(self):
+        self.assertNotIn(
+            "version",
+            self.data["project"],
+            "o pyproject voltou a ter versão literal — ela pode divergir do __version__",
         )
+        self.assertIn("version", self.data["project"].get("dynamic", []))
+
+    def test_pyproject_points_at_the_package_attribute(self):
+        alvo = self.data["tool"]["setuptools"]["dynamic"]["version"]["attr"]
+        self.assertEqual(alvo, "tiquetaque_sync.__version__")
+
+    def test_release_detector_reads_the_same_source(self):
+        """O CI decide publicar lendo esta mesma fonte."""
+        import subprocess
+
+        raiz = Path(__file__).resolve().parent.parent
+        resultado = subprocess.run(
+            [sys.executable, str(raiz / "scripts" / "version_bump.py"),
+             "--current", str(raiz / "tiquetaque_sync" / "__init__.py")],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        self.assertIn(f"version={__version__}", resultado.stdout)
 
 
 class TestUpdaterVersions(unittest.TestCase):
