@@ -3,6 +3,14 @@
 > **Aviso para Agentes de IA (Claude, Antigravity, Copilot, Cursor, OpenAI, etc.):**  
 > Este documento é a **Fonte Única da Verdade (Single Source of Truth - SSOT)** sobre a arquitetura, regras de negócio, engenharia reversa da API do TiqueTaque e guardrails operacionais deste repositório (`tique-taque-sync`). Leia atentamente antes de refatorar código, sugerir comandos, alterar a máquina de estados ou criar manifests.
 
+> ### ⚠️ Antes de encerrar qualquer alteração de comportamento
+>
+> **Suba `[project].version` no `pyproject.toml`.** Aquela linha é o gatilho da release: se
+> ela não mudar, nenhuma versão é publicada — nem o `.exe` para quem baixa da página de
+> releases, nem a imagem versionada para quem usa Docker. MAJOR quebra compatibilidade,
+> MINOR adiciona função compatível, PATCH corrige mantendo compatibilidade. Detalhes na
+> seção sobre versionamento.
+
 ---
 
 ## 🎯 1. Escopo & Filosofia do Projeto
@@ -241,7 +249,46 @@ Os notificadores em [`tiquetaque_sync/notifiers/`](tiquetaque_sync/notifiers/) o
 
 ---
 
-## 📦 11. CI/CD e publicação da imagem
+## 🔖 11. Versionamento: a linha que dispara a release
+
+**Toda alteração de comportamento sobe a versão em `[project].version` do `pyproject.toml`.**
+Quando aquela linha muda num push para a `main`, o CI:
+
+1. compila e testa o `TiqueTaqueSync.exe`;
+2. cria a tag `vX.Y.Z` e abre a release, com o `.exe` e o `.sha256` anexados;
+3. publica a imagem com as tags `X.Y.Z`, `X.Y` e `X`;
+4. escreve as instruções de download nas notas.
+
+Commit que não mexe nessa linha só atualiza `latest` e `sha-<commit>` na imagem — nenhuma
+release é criada. **Não crie tags à mão**; o fluxo manual existe só como exceção.
+
+### Qual casa incrementar (SemVer)
+
+O critério é **compatibilidade**, não tamanho nem urgência da mudança:
+
+| Incremento | Quando | Exemplos neste projeto |
+|---|---|---|
+| **MAJOR** — `2.4.1` → `3.0.0` | Quebra compatibilidade: quem atualizar precisa mudar algo | Renomear chave do `config.json`, remover comando da CLI, mudar o local dos diretórios por usuário, remover rota da API |
+| **MINOR** — `2.4.1` → `2.5.0` | Funcionalidade nova, compatível com quem já usa | Novo comando na CLI, novo campo na tela de configurações, novo canal de notificação, nova variável de ambiente **opcional** |
+| **PATCH** — `2.4.1` → `2.4.2` | Correção compatível | Alerta disparando na hora errada, bug no cálculo da jornada, correção no autostart, correção de segurança que não muda a interface |
+
+Ao subir MAJOR ou MINOR, zere as casas à direita: depois de `2.4.7`, um MINOR vira `2.5.0`
+(não `2.5.7`), e um MAJOR vira `3.0.0`.
+
+Dois casos que costumam gerar dúvida:
+
+1. **Correção de segurança não é automaticamente MAJOR nem MINOR.** Se não quebra nada e não
+   adiciona função, é PATCH — por mais grave que seja. O que move a casa é a compatibilidade,
+   não a gravidade; comunique a gravidade no texto da release.
+2. **MINOR é para funcionalidade nova, não para "correção grande".** Um bug difícil, que
+   levou dias e mexeu em meio motor, continua sendo PATCH se a interface não mudou.
+
+Pré-lançamentos usam `X.Y.Z-rc.N`: a release sai marcada como *pre-release* e as tags móveis
+`X.Y` e `X` da imagem **não** são movidas para ela.
+
+---
+
+## 📦 12. CI/CD e publicação da imagem
 
 Workflows em `.github/workflows/`:
 
@@ -264,7 +311,7 @@ Os manifests em `k8s/` já apontam para a imagem publicada. `kustomization.yaml`
 
 ---
 
-## 🪟 12. Executável Windows (PyInstaller)
+## 🪟 13. Executável Windows (PyInstaller)
 
 `packaging/tiquetaque-sync.spec` gera `dist/TiqueTaqueSync.exe`: arquivo único, sem console,
 que **abre a janela quando executado sem argumentos e age como CLI quando recebe argumentos**
@@ -324,7 +371,7 @@ imprime o código de saída e o final do log do app. Mantenha-o ao adicionar tel
 
 ---
 
-## 🛠️ 13. Comandos e Runbooks de Desenvolvimento
+## 🛠️ 14. Comandos e Runbooks de Desenvolvimento
 
 ### Instalar em modo editável
 ```bash

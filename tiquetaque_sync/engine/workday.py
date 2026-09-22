@@ -82,6 +82,14 @@ class WorkdayStatus:
         prefix = "+" if self.balance_seconds >= 0 else ""
         return f"{prefix}{format_seconds_to_hm(self.balance_seconds)}"
 
+    @property
+    def remaining_work_seconds(self) -> int:
+        return max(0, self.target_seconds - self.worked_seconds)
+
+    @property
+    def remaining_work_formatted(self) -> str:
+        return format_seconds_to_hm(self.remaining_work_seconds)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "date": self.date_str,
@@ -90,6 +98,8 @@ class WorkdayStatus:
             "worked_seconds": self.worked_seconds,
             "worked_formatted": self.worked_formatted,
             "target_seconds": self.target_seconds,
+            "remaining_work_seconds": self.remaining_work_seconds,
+            "remaining_work_formatted": self.remaining_work_formatted,
             "balance_seconds": self.balance_seconds,
             "balance_formatted": self.balance_formatted,
             "lunch_duration_seconds": self.lunch_duration_seconds,
@@ -243,38 +253,90 @@ class WorkdayEngine:
                 continuous_limit_seconds=self.continuous_limit_seconds,
             )
 
-        # 4+ entries: COMPLETED or custom multi-interval
-        total_worked = 0
-        for i in range(0, count - 1, 2):
-            total_worked += max(0, int((dts[i + 1] - dts[i]).total_seconds()))
+        # 4+ entries: COMPLETED or flexible multi-interval / multi-break
+        completed_worked = sum(
+            max(0, int((dts[i + 1] - dts[i]).total_seconds()))
+            for i in range(0, count - 1, 2)
+        )
+
+        last_completed_break = 0
+        if count >= 3:
+            if count % 2 == 1:
+                last_completed_break = max(0, int((dts[-1] - dts[-2]).total_seconds()))
+            else:
+                last_completed_break = max(0, int((dts[-2] - dts[-3]).total_seconds()))
 
         # If odd number of entries (currently in an extra shift)
         if count % 2 == 1:
             current_shift_worked = max(0, int((current_dt - dts[-1]).total_seconds()))
-            total_worked += current_shift_worked
+            total_worked = completed_worked + current_shift_worked
             continuous_worked = current_shift_worked
-            stage = WorkdayStage.CUSTOM
+            stage = WorkdayStage.WORKING_AFTERNOON
+
+            departure_dt = dts[-1] + timedelta(seconds=max(0, self.target_seconds - completed_worked))
+            secs_to_departure = max(0, int((departure_dt - current_dt).total_seconds()))
+            next_alert_label = "Fim da jornada (8h)"
+            next_alert_seconds = secs_to_departure
+            progress = (total_worked / self.target_seconds) * 100.0
+
+            return WorkdayStatus(
+                date_str=date_str,
+                stage=stage,
+                entries=sorted_times,
+                worked_seconds=total_worked,
+                target_seconds=self.target_seconds,
+                lunch_duration_seconds=last_completed_break,
+                estimated_departure=departure_dt.strftime("%H:%M"),
+                next_alert_label=next_alert_label,
+                next_alert_seconds=next_alert_seconds,
+                progress_percentage=progress,
+                continuous_work_seconds=continuous_worked,
+                continuous_limit_seconds=self.continuous_limit_seconds,
+            )
         else:
+            # Even number of entries >= 4: either COMPLETED (if total_worked >= target_seconds) or in active BREAK!
+            total_worked = completed_worked
             continuous_worked = 0
-            stage = WorkdayStage.COMPLETED
+            progress = (total_worked / self.target_seconds) * 100.0
 
-        lunch_actual = max(0, int((dts[2] - dts[1]).total_seconds())) if count >= 3 else 0
-        progress = (total_worked / self.target_seconds) * 100.0
+            if total_worked >= self.target_seconds:
+                stage = WorkdayStage.COMPLETED
+                return WorkdayStatus(
+                    date_str=date_str,
+                    stage=stage,
+                    entries=sorted_times,
+                    worked_seconds=total_worked,
+                    target_seconds=self.target_seconds,
+                    lunch_duration_seconds=last_completed_break,
+                    estimated_departure=sorted_times[-1],
+                    next_alert_label="Jornada diária finalizada",
+                    next_alert_seconds=0,
+                    progress_percentage=progress,
+                    continuous_work_seconds=0,
+                    continuous_limit_seconds=self.continuous_limit_seconds,
+                )
+            else:
+                # In active break / pause (Pausa 2, Pausa 3...)
+                stage = WorkdayStage.LUNCH_BREAK
+                break_duration = max(0, int((current_dt - dts[-1]).total_seconds()))
+                remaining_break = max(0, self.lunch_seconds - break_duration)
+                remaining_work = max(0, self.target_seconds - total_worked)
+                departure_est = (dts[-1] + timedelta(seconds=self.lunch_seconds)) + timedelta(seconds=remaining_work)
 
-        return WorkdayStatus(
-            date_str=date_str,
-            stage=stage,
-            entries=sorted_times,
-            worked_seconds=total_worked,
-            target_seconds=self.target_seconds,
-            lunch_duration_seconds=lunch_actual,
-            estimated_departure=sorted_times[-1],
-            next_alert_label="Jornada diária finalizada",
-            next_alert_seconds=0,
-            progress_percentage=progress,
-            continuous_work_seconds=continuous_worked,
-            continuous_limit_seconds=self.continuous_limit_seconds,
-        )
+                return WorkdayStatus(
+                    date_str=date_str,
+                    stage=stage,
+                    entries=sorted_times,
+                    worked_seconds=total_worked,
+                    target_seconds=self.target_seconds,
+                    lunch_duration_seconds=break_duration,
+                    estimated_departure=departure_est.strftime("%H:%M"),
+                    next_alert_label="Término do intervalo de 1h",
+                    next_alert_seconds=remaining_break,
+                    progress_percentage=progress,
+                    continuous_work_seconds=0,
+                    continuous_limit_seconds=self.continuous_limit_seconds,
+                )
 
     def evaluate_alert_triggers(self, status: WorkdayStatus, current_dt: datetime | None = None) -> list[dict[str, Any]]:
         """Evaluate if any alert should be triggered based on current status.
@@ -284,53 +346,185 @@ class WorkdayEngine:
         triggers = []
         entries = status.entries
         count = len(entries)
+        if current_dt is None:
+            current_dt = datetime.now(self.tz)
+        elif current_dt.tzinfo is None:
+            current_dt = self.tz.localize(current_dt)
+
+        dts = [parse_time_to_dt(t, current_dt, self.tz) for t in sorted(entries)]
 
         # 1. Trigger for each new entry registered
         for i, t in enumerate(entries):
             entry_key = f"entry_{i}_{t}"
-            labels = ["Entrada", "Saída Almoço", "Retorno Almoço", "Saída Final"]
-            label = labels[i] if i < len(labels) else f"Batida #{i+1}"
-            triggers.append({
-                "key": entry_key,
-                "title": f"Ponto Registrado: {label} ({t})",
-                "message": f"Batida de ponto às <b>{t}</b> confirmada no TiqueTaque ({label}).\nTotal de batidas hoje: {count}.",
-                "level": "success",
-            })
+            if i == 0:
+                triggers.append({
+                    "key": entry_key,
+                    "title": f"✅ Ponto Registrado: Entrada ({t})",
+                    "message": f"Batida de <b>Entrada</b> às <b>{t}</b> confirmada no TiqueTaque!\nTenha um excelente dia de trabalho! 🚀",
+                    "level": "success",
+                })
+            elif i == 1:
+                morning_worked = max(0, int((dts[1] - dts[0]).total_seconds()))
+                morning_str = format_seconds_to_hm(morning_worked)
+                break_est_return = (dts[1] + timedelta(hours=1)).strftime("%H:%M")
+                triggers.append({
+                    "key": entry_key,
+                    "title": f"☕ Ponto Registrado: Saída para Intervalo ({t})",
+                    "message": (
+                        f"Sua saída para intervalo foi confirmada às <b>{t}</b>.\n\n"
+                        f"📊 <b>Informações do Intervalo:</b>\n"
+                        f"• Horas trabalhadas no período: <b>{morning_str}</b>\n"
+                        f"• Retorno previsto (padrão de 1 hora): <b>{break_est_return}</b>\n\n"
+                        "Bom descanso! ☕🥪"
+                    ),
+                    "level": "info",
+                })
+            elif i == 2:
+                dur_sec = max(0, int((dts[2] - dts[1]).total_seconds()))
+                dur_str = format_seconds_to_hm(dur_sec)
+                est_dep = status.estimated_departure or "Horário padrão"
+                triggers.append({
+                    "key": entry_key,
+                    "title": f"⏱️ Ponto Registrado: Retorno do Intervalo ({t})",
+                    "message": (
+                        f"Seu retorno do intervalo foi confirmado às <b>{t}</b> (intervalo de <b>{dur_str}</b>).\n"
+                        f"Horário previsto para encerramento do expediente: <b>{est_dep}</b>.\n"
+                        "Bom retorno ao trabalho! 💼"
+                    ),
+                    "level": "info",
+                })
+            elif i % 2 == 1:
+                # Todo registro de saída adicional (batidas 4, 6...): contém as horas totais trabalhadas do dia
+                worked_up_to_punch = sum(
+                    max(0, int((dts[j + 1] - dts[j]).total_seconds()))
+                    for j in range(0, i, 2)
+                )
+                worked_str = format_seconds_to_hm(worked_up_to_punch)
+                break_est_return = (dts[i] + timedelta(hours=1)).strftime("%H:%M")
 
-        # 2. Alertas de Almoço (quando em LUNCH_BREAK)
+                if worked_up_to_punch >= self.target_seconds:
+                    triggers.append({
+                        "key": entry_key,
+                        "title": f"🏁 Ponto Registrado: Saída ({t})",
+                        "message": (
+                            f"Seu registro de <b>Saída</b> foi confirmado às <b>{t}</b>! 🎉\n\n"
+                            f"📊 <b>Resumo da Jornada:</b>\n"
+                            f"• Meta diária de 8h cumprida com sucesso!\n"
+                            f"• Total de horas trabalhadas no dia: <b>{worked_str}</b>.\n\n"
+                            f"Tenha um excelente descanso! Caso ainda vá retornar para atividades adicionais, o horário previsto de retorno da pausa é às <b>{break_est_return}</b>."
+                        ),
+                        "level": "success",
+                    })
+                else:
+                    rem_sec = max(0, self.target_seconds - worked_up_to_punch)
+                    rem_str = format_seconds_to_hm(rem_sec)
+                    triggers.append({
+                        "key": entry_key,
+                        "title": f"⏱️ Ponto Registrado: Saída / Pausa ({t})",
+                        "message": (
+                            f"Sua batida de <b>Saída</b> foi confirmada às <b>{t}</b>.\n\n"
+                            f"📊 <b>Resumo da Jornada até aqui:</b>\n"
+                            f"• Total de horas trabalhadas no dia: <b>{worked_str}</b>\n"
+                            f"• Saldo restante para a meta: <b>{rem_str}</b>\n"
+                            f"• Retorno previsto (pausa padrão de 1h): <b>{break_est_return}</b>\n\n"
+                            "Bom descanso! Não se esqueça de registrar seu retorno no TiqueTaque quando voltar. ☕"
+                        ),
+                        "level": "info",
+                    })
+            else:
+                # Retorno de pausa adicional (batidas 5, 7...)
+                pause_sec = max(0, int((dts[i] - dts[i - 1]).total_seconds()))
+                pause_str = format_seconds_to_hm(pause_sec)
+                est_dep = status.estimated_departure or "Horário padrão"
+                triggers.append({
+                    "key": entry_key,
+                    "title": f"⏱️ Ponto Registrado: Retorno ({t})",
+                    "message": (
+                        f"Seu retorno foi confirmado às <b>{t}</b> (intervalo de <b>{pause_str}</b>).\n"
+                        f"Horário previsto para encerramento da jornada: <b>{est_dep}</b>.\n"
+                        "Bom retorno ao trabalho! 💼"
+                    ),
+                    "level": "info",
+                })
+
+        # 2. Alertas de Intervalo (quando em LUNCH_BREAK)
         if status.stage == WorkdayStage.LUNCH_BREAK:
             secs_left = status.next_alert_seconds or 0
             warn_adv_threshold = self.lunch_advance_warning * 60
             warn_final_threshold = self.lunch_final_warning * 60
+            break_idx = count // 2
 
-            # Alerta prévio (ex: 10 minutos antes)
+            key_adv = "lunch_warning" if break_idx <= 1 else f"lunch_warning_break_{break_idx}"
+            key_fin = "lunch_warning_final" if break_idx <= 1 else f"lunch_warning_final_break_{break_idx}"
+            key_over = "lunch_overtime" if break_idx <= 1 else f"lunch_overtime_break_{break_idx}"
+            key_2h_adv = "lunch_2h_warning" if break_idx <= 1 else f"lunch_2h_warning_break_{break_idx}"
+            key_2h_fin = "lunch_2h_warning_final" if break_idx <= 1 else f"lunch_2h_warning_final_break_{break_idx}"
+
+            # Alerta prévio (ex: 10 minutos antes de 1h)
             if warn_final_threshold < secs_left <= warn_adv_threshold:
                 mins_left = max(1, (secs_left + 30) // 60)
                 triggers.append({
-                    "key": "lunch_warning",
-                    "title": f"⚠️ Aviso de Almoço ({mins_left} min)",
-                    "message": f"Seu intervalo de almoço completará 1h em aproximadamente <b>{mins_left} minutos</b>. Prepare-se para registrar o retorno!",
+                    "key": key_adv,
+                    "title": f"⚠️ Aviso de Intervalo ({mins_left} min)",
+                    "message": f"Seu intervalo completará 1h em aproximadamente <b>{mins_left} minutos</b>. Prepare-se para registrar o retorno!",
                     "level": "warning",
                 })
-            # Alerta final (ex: 1 minuto antes)
+            # Alerta final (ex: 1 minuto antes de 1h)
             elif 0 < secs_left <= warn_final_threshold:
                 triggers.append({
-                    "key": "lunch_warning_final",
-                    "title": "🚨 Alerta Final: 1 Minuto para Fim do Almoço!",
-                    "message": "Falta apenas <b>1 minuto</b> para completar seu intervalo de 1h de almoço!\nRegistre o retorno agora no TiqueTaque para manter a pontualidade.",
+                    "key": key_fin,
+                    "title": "🚨 Alerta Final: 1 Minuto para Fim do Intervalo!",
+                    "message": "Falta apenas <b>1 minuto</b> para completar seu intervalo padrão de 1h!\nRegistre o retorno agora no TiqueTaque para manter a pontualidade.",
                     "level": "warning",
                 })
-            # Alerta de almoço concluído/estourado
-            elif secs_left == 0 and status.lunch_duration_seconds >= self.lunch_seconds:
+            # Alerta de intervalo de 1h concluído
+            elif secs_left == 0 and status.lunch_duration_seconds >= self.lunch_seconds and status.lunch_duration_seconds < (self.lunch_seconds + 300):
                 triggers.append({
-                    "key": "lunch_overtime",
-                    "title": "ℹ️ Intervalo de Almoço Concluído (1h)",
-                    "message": "Seu intervalo de almoço de 1h já foi atingido! Lembre-se de registrar o ponto de retorno.",
+                    "key": key_over,
+                    "title": "ℹ️ Intervalo Concluído (1h)",
+                    "message": "Seu intervalo padrão de 1h já foi atingido! Lembre-se de registrar o ponto de retorno quando finalizar a pausa.",
                     "level": "info",
                 })
 
-        # 3. Alertas de Fim de Expediente de 8h (quando em WORKING_AFTERNOON)
-        if status.stage == WorkdayStage.WORKING_AFTERNOON:
+            # Alertas de Intervalo Prolongado aproximando de 2h (Limite CLT Art. 71)
+            secs_to_2h = 7200 - status.lunch_duration_seconds
+            if status.lunch_duration_seconds > self.lunch_seconds:
+                if warn_final_threshold < secs_to_2h <= warn_adv_threshold:
+                    mins_left_2h = max(1, (secs_to_2h + 30) // 60)
+                    triggers.append({
+                        "key": key_2h_adv,
+                        "title": f"⚠️ Aviso de Intervalo Prolongado ({mins_left_2h} min para 2h)",
+                        "message": (
+                            f"Seu intervalo já tem <b>{format_seconds_to_hm(status.lunch_duration_seconds)}</b> decorridos.\n"
+                            f"Faltam aproximadamente <b>{mins_left_2h} minutos</b> para atingir o limite de 2 horas (Artigo 71 da CLT).\n"
+                            "Caso esteja na academia ou resolvendo pendências, vá se preparando para registrar seu retorno! ⏱️"
+                        ),
+                        "level": "warning",
+                    })
+                elif 0 < secs_to_2h <= warn_final_threshold:
+                    triggers.append({
+                        "key": key_2h_fin,
+                        "title": "🚨 Atenção: 1 Minuto para Limite Máximo de Intervalo (2h)!",
+                        "message": (
+                            "Falta apenas <b>1 minuto</b> para completar 2 horas de intervalo.\n"
+                            "Pela CLT, o intervalo de descanso/alimentação não deve ultrapassar 2h.\n"
+                            "Registre seu retorno no TiqueTaque agora para retomar suas atividades! 🛑"
+                        ),
+                        "level": "error",
+                    })
+                elif -300 <= secs_to_2h <= 0:
+                    triggers.append({
+                        "key": f"{key_2h_fin}_exceeded",
+                        "title": "🛑 Limite Máximo de 2h de Intervalo Excedido (CLT)",
+                        "message": (
+                            f"Atenção: seu intervalo ultrapassou o limite legal de 2 horas (tempo decorrido: <b>{format_seconds_to_hm(status.lunch_duration_seconds)}</b>).\n\n"
+                            "Por favor, retorne às atividades e registre o seu ponto no TiqueTaque imediatamente!"
+                        ),
+                        "level": "error",
+                    })
+
+        # 3. Alertas de Fim de Expediente de 8h (quando em WORKING_AFTERNOON ou CUSTOM)
+        if status.stage in (WorkdayStage.WORKING_AFTERNOON, WorkdayStage.CUSTOM):
             secs_left = status.next_alert_seconds or 0
             warn_adv_threshold = self.end_work_advance_warning * 60
             warn_final_threshold = self.end_work_final_warning * 60
@@ -402,12 +596,13 @@ class WorkdayEngine:
         if status.stage == WorkdayStage.COMPLETED:
             triggers.append({
                 "key": "workday_completed",
-                "title": "🎉 Jornada Finalizada com Sucesso!",
+                "title": "🎉 Jornada Concluída!",
                 "message": (
-                    f"Expediente de hoje concluído!\n"
+                    f"Expediente de hoje encerrado!\n"
                     f"• Total trabalhado: <b>{status.worked_formatted}</b>\n"
                     f"• Saldo do dia: <b>{status.balance_formatted}</b>\n"
-                    f"• Almoço: <b>{format_seconds_to_hm(status.lunch_duration_seconds)}</b>"
+                    f"• Registros: <code>{', '.join(status.entries)}</code>\n\n"
+                    "Tenha um ótimo descanso!"
                 ),
                 "level": "success",
             })

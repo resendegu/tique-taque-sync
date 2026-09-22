@@ -1,12 +1,16 @@
 name: Release
 
-# Ao publicar uma release no GitHub, compila o executável do Windows e anexa
-# o arquivo aos assets, para o usuário baixar e rodar sem instalar Python.
+# Caminho principal: subir `[project].version` no pyproject.toml e dar push na
+# main. Isso compila o executável do Windows, cria a tag `vX.Y.Z`, abre a
+# release e anexa o .exe — nenhuma tag precisa ser criada à mão.
 #
-# Também dá para rodar manualmente (workflow_dispatch) para testar o build sem
-# publicar nada: o .exe fica disponível como artefato da execução.
+# Também roda ao publicar uma release manualmente (para tags criadas fora deste
+# fluxo) e via workflow_dispatch, que sem tag só gera o .exe como artefato.
 
 on:
+  push:
+    branches: [main]
+    paths: ["pyproject.toml"]
   release:
     types: [published]
   workflow_dispatch:
@@ -20,14 +24,91 @@ permissions:
   contents: read
 
 jobs:
-  windows-exe:
-    name: Executável do Windows
-    runs-on: windows-latest
-    permissions:
-      contents: write # necessário para anexar o asset à release
+  # Decide se este run publica uma versão e qual é a tag envolvida. Centralizar
+  # aqui evita repetir a lógica dos três gatilhos em cada passo do job pesado.
+  version:
+    name: Versão do pyproject
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+      tag: ${{ steps.decide.outputs.tag }}
+      version: ${{ steps.decide.outputs.version }}
+      prerelease: ${{ steps.decide.outputs.prerelease || 'false' }}
+      # true só no caminho do bump: aí a tag e a release ainda não existem.
+      create: ${{ steps.decide.outputs.create || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detectar alteração de versão
+        id: detect
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          if git show HEAD^:pyproject.toml > /tmp/previous.toml 2>/dev/null; then
+            python scripts/version_bump.py --current pyproject.toml --previous /tmp/previous.toml
+          else
+            python scripts/version_bump.py --current pyproject.toml
+          fi
+
+      - name: Decidir o que este run faz
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          CHANGED: ${{ steps.detect.outputs.changed }}
+          VERSION: ${{ steps.detect.outputs.version }}
+          PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.upload_to_release }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            push)
+              # Só constrói quando a versão mudou: commit comum não vira release.
+              if [ "${CHANGED:-false}" = "true" ]; then
+                {
+                  echo "build=true"
+                  echo "create=true"
+                  echo "tag=v${VERSION}"
+                  echo "version=${VERSION}"
+                  echo "prerelease=${PRERELEASE:-false}"
+                } >> "$GITHUB_OUTPUT"
+              else
+                echo "build=false" >> "$GITHUB_OUTPUT"
+                echo "::notice::Versão inalterada — nenhuma release neste commit."
+              fi
+              ;;
+            release)
+              # Tag criada à mão: a release já existe, só falta o .exe.
+              {
+                echo "build=true"
+                echo "tag=${RELEASE_TAG}"
+                echo "version=${RELEASE_TAG#v}"
+              } >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              {
+                echo "build=true"
+                echo "tag=${INPUT_TAG}"
+                echo "version=${INPUT_TAG#v}"
+              } >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+  windows-exe:
+    name: Executável do Windows
+    needs: version
+    if: needs.version.outputs.build == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write # necessário para criar a release e anexar o asset
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # histórico completo para o --generate-notes
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -129,22 +210,53 @@ jobs:
             dist/TiqueTaqueSync.exe.sha256
           if-no-files-found: error
 
-      - name: Anexar à release
-        if: github.event_name == 'release' || inputs.upload_to_release != ''
+      # Só no caminho do bump de versão: a tag e a release ainda não existem.
+      # O .exe já foi compilado e testado acima, então a release nasce completa.
+      - name: Criar a tag e a release
+        if: needs.version.outputs.create == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || inputs.upload_to_release }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (git tag --list $env:TAG) {
+            Write-Host "::notice::A tag $env:TAG já existe — seguindo para o upload."
+          } else {
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a $env:TAG -m "Release $env:VERSION"
+            git push origin $env:TAG
+          }
+
+          gh release view $env:TAG 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "::notice::A release $env:TAG já existe — as notas serão atualizadas."
+          } else {
+            $flags = @("--title", $env:TAG, "--generate-notes")
+            if ($env:PRERELEASE -eq "true") { $flags += "--prerelease" }
+            gh release create $env:TAG @flags
+          }
+
+      - name: Anexar à release
+        if: needs.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: gh release upload "$env:TAG" dist/TiqueTaqueSync.exe dist/TiqueTaqueSync.exe.sha256 --clobber
 
       # Acrescenta as instruções de download e a mensagem do commit ao corpo da
       # release. O que a pessoa escreveu à mão é preservado: o bloco gerado fica
       # abaixo de um marcador e é substituído (não duplicado) a cada re-execução.
       - name: Escrever as instruções de download na release
-        if: github.event_name == 'release' || inputs.upload_to_release != ''
+        if: needs.version.outputs.tag != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.event.release.tag_name || inputs.upload_to_release }}
+          TAG: ${{ needs.version.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
           $marker = "<!-- gerado automaticamente pelo workflow Release -->"
@@ -153,6 +265,10 @@ jobs:
           $commitSha = (git rev-parse --short HEAD).Trim()
           $sha256 = (Get-Content dist/TiqueTaqueSync.exe.sha256 -Raw).Split(" ")[0].Trim()
           $exeUrl = "https://github.com/$env:REPO/releases/download/$env:TAG/TiqueTaqueSync.exe"
+          # A tag da IMAGEM não é a tag do git: a metadata-action remove o "v"
+          # de `v1.2.3` e publica `1.2.3`. Citar a tag do git aqui mandaria a
+          # pessoa dar `docker run` numa tag que não existe.
+          $imageTag = $env:TAG -replace '^v', ''
 
           $generated = @"
           $marker
@@ -190,7 +306,7 @@ jobs:
           pip install git+https://github.com/${env:REPO}.git@${env:TAG}
 
           # Servidor / homelab, via Docker (amd64 e arm64)
-          docker run -d --name tiquetaque-sync -p 8000:8000 ghcr.io/${env:REPO}:${env:TAG}
+          docker run -d --name tiquetaque-sync -p 8000:8000 ghcr.io/${env:REPO}:${imageTag}
           ``````
 
           Instruções completas, incluindo Kubernetes, no [README](https://github.com/$env:REPO#readme).

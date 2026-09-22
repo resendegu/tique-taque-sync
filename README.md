@@ -428,18 +428,37 @@ Dois workflows em [`.github/workflows/`](.github/workflows/):
 | -------- | ---------- | --------- |
 | [`ci.yml`](.github/workflows/ci.yml) | push na `main`, PRs | Roda a suíte em Python 3.11/3.12/3.13 e valida `pip install .` no Linux, Windows e macOS (entry points + arquivos de template empacotados) |
 | [`docker.yml`](.github/workflows/docker.yml) | push na `main`, tags `v*.*.*`, PRs que tocam a imagem | Builda `linux/amd64` + `linux/arm64` e publica em `ghcr.io/resendegu/tique-taque-sync` com proveniência e SBOM (em PR, só builda) |
-| [`release.yml`](.github/workflows/release.yml) | release publicada (ou manual) | Compila `TiqueTaqueSync.exe` com PyInstaller, sobe o app de verdade para validar painel/configurações/estáticos, gera o `.sha256`, anexa os dois aos assets e escreve nas notas da release as instruções de download e a mensagem do último commit |
+| [`release.yml`](.github/workflows/release.yml) | versão alterada no `pyproject.toml` (ou release publicada à mão) | Compila `TiqueTaqueSync.exe` com PyInstaller, sobe o app de verdade para validar painel/configurações/estáticos, gera o `.sha256`, **cria a tag e a release**, anexa os arquivos e escreve as instruções de download |
 
-Para publicar uma versão:
+### Como publicar uma versão
 
-```bash
-git tag v1.2.3
-git push origin v1.2.3
+Não crie a tag à mão: **suba a versão em `[project].version` do `pyproject.toml`** e faça
+push para a `main`.
+
+```toml
+[project]
+name = "tiquetaque-sync"
+version = "2.1.0"   # <- alterar esta linha é o que publica uma release
 ```
 
-Isso gera as tags `1.2.3`, `1.2`, `1` no GHCR. Ao **publicar a release** dessa tag na
-interface do GitHub, o `release.yml` compila o `.exe` e o anexa automaticamente aos assets
-— o usuário final baixa direto dali.
+O CI compila e testa o `.exe`, cria a tag `v2.1.0`, abre a release com o executável e o
+checksum anexados, publica a imagem com as tags `2.1.0`, `2.1` e `2`, e escreve as instruções
+de download nas notas. Commits que não mexem nessa linha atualizam apenas `latest` e
+`sha-<commit>` na imagem.
+
+Qual casa incrementar (regra do [SemVer](https://semver.org/lang/pt-BR/) — o critério é
+compatibilidade, não o tamanho da mudança):
+
+| Incremento | Quando |
+|---|---|
+| **MAJOR** `2.1.0` → `3.0.0` | Quebra compatibilidade (renomear chave do `config.json`, remover comando da CLI) |
+| **MINOR** `2.1.0` → `2.2.0` | Funcionalidade nova compatível (novo comando, novo campo nas configurações) |
+| **PATCH** `2.1.0` → `2.1.1` | Correção compatível — inclusive correção de segurança que não muda a interface |
+
+Pré-lançamento: `2.2.0-rc.1` sai marcado como *pre-release* e não move as tags `2.2` e `2`.
+
+Note que o `v` **cai** na imagem: a tag do git `v2.1.0` vira
+`ghcr.io/resendegu/tique-taque-sync:2.1.0`.
 
 As notas da release são completadas automaticamente com o passo a passo de download, o
 checksum, as alternativas (pip/Docker) e a mensagem do último commit. **O texto que você

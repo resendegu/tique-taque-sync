@@ -2,6 +2,7 @@
 
 import json
 import os
+import socket
 import sys
 import unittest
 from pathlib import Path
@@ -121,10 +122,18 @@ class TestFrozenMode(unittest.TestCase):
 
 class TestGUI(unittest.TestCase):
     def test_probe_reports_stopped_when_nothing_listens(self):
+        from tiquetaque_sync.config import settings
         from tiquetaque_sync.gui import probe_service
 
-        # Nothing is listening on the configured port during the tests.
-        self.assertFalse(probe_service().running)
+        # A porta padrão não serve para este teste: quem desenvolve costuma ter
+        # o próprio app rodando nela, e o teste falharia por isso. Pegamos uma
+        # porta efêmera livre e a liberamos antes de sondar.
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            free_port = probe.getsockname()[1]
+
+        with mock.patch.object(settings, "port", free_port):
+            self.assertFalse(probe_service().running)
 
     def test_stage_labels_cover_every_engine_stage(self):
         from tiquetaque_sync.engine.workday import WorkdayStage

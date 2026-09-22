@@ -176,6 +176,90 @@ def test_workday_engine_clt_6h_continuous():
 
 
 
+def test_workday_engine_lunch_2h_warning():
+    engine = WorkdayEngine(target_hours=8.0, lunch_advance_warning=10, lunch_final_warning=1, timezone_name="America/Sao_Paulo")
+    tz = pytz.timezone("America/Sao_Paulo")
+
+    # 12:00 lunch start.
+    # At 13:50 (1h50m elapsed, exactly 10 min left to 2h) -> 2h advance warning
+    t_10min = tz.localize(datetime(2026, 9, 21, 13, 50))
+    status_10 = engine.calculate_status(["08:00", "12:00"], current_dt=t_10min)
+    triggers_10 = engine.evaluate_alert_triggers(status_10, current_dt=t_10min)
+    keys_10 = [t["key"] for t in triggers_10]
+    assert "lunch_2h_warning" in keys_10
+    assert "lunch_2h_warning_final" not in keys_10
+
+    # At 13:59:15 (1h59m15s elapsed, 45s left to 2h) -> 2h final warning
+    t_1min = tz.localize(datetime(2026, 9, 21, 13, 59, 15))
+    status_1 = engine.calculate_status(["08:00", "12:00"], current_dt=t_1min)
+    triggers_1 = engine.evaluate_alert_triggers(status_1, current_dt=t_1min)
+    keys_1 = [t["key"] for t in triggers_1]
+    assert "lunch_2h_warning_final" in keys_1
+
+    # At 14:02:00 (2h02m elapsed, exceeded 2h limit) -> 2h exceeded warning
+    t_exc = tz.localize(datetime(2026, 9, 21, 14, 2))
+    status_exc = engine.calculate_status(["08:00", "12:00"], current_dt=t_exc)
+    triggers_exc = engine.evaluate_alert_triggers(status_exc, current_dt=t_exc)
+    keys_exc = [t["key"] for t in triggers_exc]
+    assert "lunch_2h_warning_final_exceeded" in keys_exc
+
+
+def test_workday_engine_multi_break_flexible():
+    engine = WorkdayEngine(target_hours=8.0, timezone_name="America/Sao_Paulo")
+    tz = pytz.timezone("America/Sao_Paulo")
+
+    # 4 punches: 08:00-10:00 (2h) and 10:30-12:00 (1.5h) -> 3.5h worked. Total < 8h -> active break 2
+    now_break = tz.localize(datetime(2026, 9, 21, 12, 15))
+    status_break = engine.calculate_status(["08:00", "10:00", "10:30", "12:00"], current_dt=now_break)
+    assert status_break.stage == WorkdayStage.LUNCH_BREAK
+    assert status_break.worked_seconds == int(3.5 * 3600)
+    assert status_break.lunch_duration_seconds == 15 * 60
+    assert status_break.remaining_work_seconds == int(4.5 * 3600)
+    assert status_break.remaining_work_formatted == "04h30min"
+    # Planned return 12:00 + 1h = 13:00 + 4.5h work -> 17:30
+    assert status_break.estimated_departure == "17:30"
+
+    # 5 punches: clock back in at 13:00, evaluating at 15:00
+    now_shift = tz.localize(datetime(2026, 9, 21, 15, 0))
+    status_shift = engine.calculate_status(["08:00", "10:00", "10:30", "12:00", "13:00"], current_dt=now_shift)
+    assert status_shift.stage == WorkdayStage.WORKING_AFTERNOON
+    # 3.5h + 2h = 5.5h
+    assert status_shift.worked_seconds == int(5.5 * 3600)
+    assert status_shift.estimated_departure == "17:30"
+
+    # 6 punches: clock out at 17:30 reaching 8h
+    now_done = tz.localize(datetime(2026, 9, 21, 17, 35))
+    status_done = engine.calculate_status(["08:00", "10:00", "10:30", "12:00", "13:00", "17:30"], current_dt=now_done)
+    assert status_done.stage == WorkdayStage.COMPLETED
+    assert status_done.worked_seconds == 8 * 3600
+    assert status_done.balance_seconds == 0
+    assert status_done.balance_formatted == "+00h00min"
+
+
+def test_workday_engine_additional_exit_punch_summary():
+    engine = WorkdayEngine(target_hours=8.0, timezone_name="America/Sao_Paulo")
+    tz = pytz.timezone("America/Sao_Paulo")
+
+    # 4 punches: punch #4 at 12:00 (< 8h worked)
+    now_4 = tz.localize(datetime(2026, 9, 21, 12, 0))
+    status_4 = engine.calculate_status(["08:00", "10:00", "10:30", "12:00"], current_dt=now_4)
+    triggers_4 = engine.evaluate_alert_triggers(status_4, current_dt=now_4)
+    punch_4_trigger = next(t for t in triggers_4 if t["key"] == "entry_3_12:00")
+    assert "Saída / Pausa" in punch_4_trigger["title"]
+    assert "03h30min" in punch_4_trigger["message"]
+    assert "04h30min" in punch_4_trigger["message"]
+    assert "13:00" in punch_4_trigger["message"]
+
+    # 6 punches: punch #6 at 17:30 (>= 8h worked)
+    now_6 = tz.localize(datetime(2026, 9, 21, 17, 30))
+    status_6 = engine.calculate_status(["08:00", "10:00", "10:30", "12:00", "13:00", "17:30"], current_dt=now_6)
+    triggers_6 = engine.evaluate_alert_triggers(status_6, current_dt=now_6)
+    punch_6_trigger = next(t for t in triggers_6 if t["key"] == "entry_5_17:30")
+    assert "Saída" in punch_6_trigger["title"]
+    assert "08h00min" in punch_6_trigger["message"]
+    assert "Meta diária de 8h cumprida" in punch_6_trigger["message"]
+
+
 # ------------------------------------------------------------------------------
 # unittest wrappers so the plain-function tests above are picked up by discovery
 # ------------------------------------------------------------------------------
@@ -199,6 +283,9 @@ class TestTiqueTaqueEngine(unittest.TestCase):
     def test_lunch_final_warning(self):
         test_workday_engine_lunch_final_warning()
 
+    def test_lunch_2h_warning(self):
+        test_workday_engine_lunch_2h_warning()
+
     def test_afternoon(self):
         test_workday_engine_afternoon_recalculation()
 
@@ -207,6 +294,12 @@ class TestTiqueTaqueEngine(unittest.TestCase):
 
     def test_clt_6h_continuous(self):
         test_workday_engine_clt_6h_continuous()
+
+    def test_multi_break_flexible(self):
+        test_workday_engine_multi_break_flexible()
+
+    def test_additional_exit_punch_summary(self):
+        test_workday_engine_additional_exit_punch_summary()
 
     def test_completed(self):
         test_workday_engine_completed()
@@ -218,3 +311,4 @@ class TestTiqueTaqueEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
