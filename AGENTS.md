@@ -41,6 +41,10 @@ tiquetaque_sync/
 ├── store.py                # Leitura/escrita de config.json + máscara de segredos
 ├── config.py               # Pydantic Settings (env > .env > config.json > defaults)
 ├── autostart.py            # Registro no login do SO (Startup / LaunchAgent / systemd)
+├── tray.py                 # Ícone na bandeja do Windows (Win32 via ctypes)
+├── singleton.py            # Trava de instância única (lock de arquivo do SO)
+├── updater.py              # Auto-atualização a partir das releases do GitHub
+├── assets/                 # icon.ico e icon.png do app (janela e bandeja)
 ├── runtime.py              # AppRuntime: constrói e recarrega engine/client/scheduler
 ├── main.py                 # FastAPI app, rotas REST, painel, /settings e lifespan
 ├── tiquetaque/
@@ -203,7 +207,13 @@ Para garantir precisão cirúrgica de alertas sem sobrecarregar ou correr o risc
 
 Regras invioláveis:
 1. **Nunca exigir privilégio de administrador/root.** Tudo mora no perfil do usuário. Não escreva em `HKLM`, `/etc/systemd/system` ou `/Library/LaunchDaemons`.
-2. O comando registrado é sempre `... start --no-browser` — o serviço sobe em background, sem roubar o foco no login.
+2. O comando registrado é `... gui --autostart` (ver `autostart_command()`): o login abre a
+   **janela**, que por sua vez sobe o serviço e aparece na bandeja. Antes registrava
+   `start --no-browser`, e o resultado era um processo invisível — sem janela, sem bandeja e
+   sem nada indicando que o app estava rodando. Com a preferência `start_minimized`, a janela
+   nasce escondida e só o ícone da bandeja aparece.
+   `launch_command()` continua existindo e serve outro propósito: é como a **janela** sobe o
+   serviço. Não confunda os dois.
 3. `_launch_command()` prefere o console script no PATH e só cai para `python -m tiquetaque_sync` quando rodando de um checkout.
 
 ---
@@ -214,8 +224,36 @@ Regras da janela:
 
 1. **Somente biblioteca padrão.** Tkinter e nada mais — sem PyQt, sem pywebview. O import é protegido e levanta `TkinterUnavailable` com instrução de instalação (`python3-tk`), porque algumas distros Linux empacotam o Tk à parte.
 2. **Nunca bloquear o loop do Tk.** A sondagem HTTP (`probe_service`) roda em thread e entrega o resultado por `queue.Queue`; o loop do Tk só consome (`_drain_loop`, 200 ms) e re-agenda o probe (`_refresh`, 2 s). Nenhuma chamada de rede pode acontecer direto num callback de botão.
-3. **A janela não é dona do serviço.** Ela sobe um processo filho com `autostart.launch_command(windowless=True)`; fechar a janela **não** encerra o serviço, e ela se recusa a matar uma instância que não subiu (autostart/terminal) — apenas explica.
+3. **A janela não é dona do serviço.** Ela sobe um processo filho com
+   `autostart.launch_command(windowless=True)`; fechar a janela **não** encerra o serviço, e
+   ela se recusa a matar uma instância que não subiu (autostart/terminal) — apenas explica.
+   Ao abrir, a janela garante que o serviço esteja de pé (`_ensure_service_running`): abrir o
+   app e nada acontecer não é uma experiência defensável.
 4. **Estados da jornada** vêm de `WorkdayStage`; `STAGE_LABELS` precisa cobrir todos (há teste garantindo isso).
+5. **O X minimiza para a bandeja; sair é pelo menu dela.** Quando há bandeja, fechar a janela
+   só a esconde (com balão avisando na primeira vez). Sem bandeja (Linux/macOS), o X fecha a
+   janela e o serviço continua — comportamento antigo.
+6. **A bandeja fala com o Tk por fila, nunca direto.** `tray.py` roda um laço de mensagens
+   Win32 em thread própria (exigência do Win32: janela e laço na mesma thread) e publica o
+   comando numa `queue.Queue`; quem executa é o `_drain_loop` do Tk. Tkinter não é
+   thread-safe — **não** chame widget a partir do callback da bandeja.
+7. **Ícone do app vem de `paths.app_icon()`**, que resolve `sys._MEIPASS` no executável
+   congelado. O `icon=` do `.spec` é só o recurso do arquivo `.exe`; a janela e a bandeja
+   precisam do arquivo em disco, por isso `assets/` está em `datas` e em `package-data`.
+
+### Instância única (`singleton.py`)
+
+Duas travas independentes, ambas por lock de arquivo do SO (`flock` / `msvcrt.locking`):
+
+* **`service`** — impede dois servidores sincronizando a mesma jornada, o que duplicaria
+  notificações e colocaria dois processos gravando no mesmo SQLite. A checagem de porta em
+  `cmd_start` é cortesia (mensagem amigável), **não** é a proteção: duas instâncias em portas
+  diferentes passariam por ela.
+* **`gui`** — abrir o app uma segunda vez traz a janela existente para frente
+  (`focus_existing_window`) em vez de duplicar o painel.
+
+O lock é do sistema operacional de propósito: ele é liberado quando o processo morre, então
+um desligamento abrupto não deixa trava fantasma. **Não troque por arquivo-sentinela.**
 
 Atalhos (`shortcut.py`): `.lnk` via `WScript.Shell` (Windows, sem dependência COM extra), `.desktop` em `~/.local/share/applications` (Linux), `.command` em `~/Applications` (macOS). Sempre no perfil do usuário e apontando para `tiquetaque-sync-gui`.
 
@@ -249,9 +287,58 @@ Os notificadores em [`tiquetaque_sync/notifiers/`](tiquetaque_sync/notifiers/) o
 
 ---
 
-## 🔖 11. Versionamento: a linha que dispara a release
+## ⬇️ 11. Auto-atualização (`updater.py`)
 
-**Toda alteração de comportamento sobe a versão em `[project].version` do `pyproject.toml`.**
+O app consulta as releases do GitHub, baixa o `.exe` novo e o troca no próximo início.
+**Configuração e banco não são tocados** — eles moram em `%APPDATA%`/`%LOCALAPPDATA%`, fora do
+executável, então atualizar nunca pede reconfiguração. Esse isolamento é o que torna a
+atualização barata; não mova estado para junto do binário.
+
+### Regras de segurança — aqui se baixa e se executa um binário
+
+1. **O repositório é fixo no código** (`updater.REPO`). Não torne isso configurável por
+   arquivo, variável de ambiente ou tela: seria um caminho direto para execução remota de
+   código.
+2. **Só HTTPS.** `_open()` recusa qualquer outro esquema.
+3. **Checksum obrigatório.** O `.exe` é conferido contra o `.sha256` publicado na mesma
+   release. Sem checksum, ou com checksum divergente, o arquivo é descartado e nada é
+   instalado. Não adicione um caminho que pule essa verificação.
+4. **A troca nunca acontece no meio do uso.** O download fica *staged* em
+   `<data_dir>/updates/pending.exe`; a troca ocorre no início do processo seguinte.
+
+### Como a troca funciona
+
+O Windows não deixa **sobrescrever** um `.exe` em execução, mas deixa **renomeá-lo**. Daí a
+sequência de `apply_pending_update()`:
+
+1. renomeia o executável atual para `TiqueTaqueSync.old.exe`;
+2. move o baixado para o lugar do original;
+3. relança e sai (se o passo 2 falhar, o passo 1 é revertido).
+
+`cleanup_backup()` apaga o `.old.exe` na execução seguinte — falha silenciosa é esperada
+enquanto o processo anterior ainda estiver saindo.
+
+`main()` chama isso **antes de qualquer trava ou servidor**: é o único momento em que nada
+está em uso. Não mova essa chamada para depois.
+
+### Restrições conscientes
+
+* **Só o formato de arquivo único.** A versão em pasta (`TiqueTaqueSync-pasta.zip`) não é
+  atualizada automaticamente — trocar um diretório inteiro em uso é outra classe de problema.
+* **Instalação via pip não troca binário:** o updater apenas avisa e sugere
+  `pip install --upgrade`.
+* **Na janela**, o fluxo de reinício solta a trava de instância única *antes* de lançar o novo
+  processo (`_restart_to_update`). Invertendo a ordem, o processo novo esbarra na trava e sai
+  sem abrir.
+
+---
+
+## 🔖 12. Versionamento: a linha que dispara a release
+
+**Toda alteração de comportamento sobe a versão em `[project].version` do `pyproject.toml`
+— e em `tiquetaque_sync/__init__.py`, que precisa bater com ela** (há teste garantindo).
+O `__version__` é o que o auto-updater compara com a release publicada: se ficar para trás,
+o app se acha desatualizado para sempre e rebaixa a mesma versão em loop.
 Quando aquela linha muda num push para a `main`, o CI:
 
 1. compila e testa o `TiqueTaqueSync.exe`;
@@ -288,7 +375,7 @@ Pré-lançamentos usam `X.Y.Z-rc.N`: a release sai marcada como *pre-release* e 
 
 ---
 
-## 📦 12. CI/CD e publicação da imagem
+## 📦 13. CI/CD e publicação da imagem
 
 Workflows em `.github/workflows/`:
 
@@ -311,7 +398,7 @@ Os manifests em `k8s/` já apontam para a imagem publicada. `kustomization.yaml`
 
 ---
 
-## 🪟 13. Executável Windows (PyInstaller)
+## 🪟 14. Executável Windows (PyInstaller)
 
 `packaging/tiquetaque-sync.spec` gera `dist/TiqueTaqueSync.exe`: arquivo único, sem console,
 que **abre a janela quando executado sem argumentos e age como CLI quando recebe argumentos**
@@ -340,6 +427,12 @@ que **abre a janela quando executado sem argumentos e age como CLI quando recebe
 6. **`multiprocessing.freeze_support()`** fica na primeira linha do entry point — sem ele um
    processo filho reabriria a janela.
 7. **Sem UPX** no `.spec`: compressão dispara falso-positivo de antivírus.
+7b. **Win32 via ctypes exige `argtypes`/`restype`.** Sem declarar, o ctypes assume `int` de
+   32 bits e trunca todo handle (HWND, HINSTANCE, HICON) em Windows 64 bits — o sintoma é
+   `OverflowError: int too long to convert` ao repassar o handle para a chamada seguinte.
+   `tray._declare_prototypes()` existe para isso. Outra pegadinha: com
+   `restype=c_void_p`, `DefWindowProcW` devolve `None` no lugar de zero, e devolver `None`
+   de um callback declarado como inteiro derruba o WNDPROC — daí o `or 0`.
 8. **O `.spec` produz dois formatos.** Sem variável de ambiente sai o arquivo único; com
    `TTQ_ONEDIR=1` sai a versão em pasta (`COLLECT`). A release publica os dois, porque o
    modo arquivo único se descompacta em `%TEMP%` a cada execução e isso é gatilho de
@@ -395,7 +488,7 @@ imprime o código de saída e o final do log do app. Mantenha-o ao adicionar tel
 
 ---
 
-## 🛠️ 14. Comandos e Runbooks de Desenvolvimento
+## 🛠️ 15. Comandos e Runbooks de Desenvolvimento
 
 ### Instalar em modo editável
 ```bash

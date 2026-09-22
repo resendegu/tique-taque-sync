@@ -21,10 +21,13 @@ import urllib.error
 import urllib.request
 import webbrowser
 
-from . import autostart, paths, shortcut, store
+from . import autostart, paths, shortcut, store, updater
+from .singleton import SingleInstance
 from .config import reload_settings, settings
 
-APP_VERSION = "2.0.0"
+# Uma fonte só: o pyproject.toml dispara a release e o __init__ a espelha
+# (há teste garantindo que não divergem).
+from . import __version__ as APP_VERSION
 
 
 # ------------------------------------------------------------------------------
@@ -152,8 +155,19 @@ def cmd_start(args: argparse.Namespace) -> int:
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}"
 
     if _instance_already_running(host, port):
-        _say(f"TiqueTaque Sync já está rodando em {url} — abrindo o painel.")
-        webbrowser.open(url)
+        _say(f"TiqueTaque Sync já está rodando em {url}.")
+        # Sem isto, o autostart (que passa --no-browser) abriria o navegador
+        # sozinho sempre que encontrasse uma instância de pé.
+        if not args.no_browser:
+            webbrowser.open(url)
+        return 0
+
+    # Trava de verdade: a checagem de porta acima é uma cortesia e não protege
+    # contra dois processos subindo ao mesmo tempo, nem contra duas instâncias
+    # em portas diferentes gravando no mesmo SQLite.
+    lock = SingleInstance("service")
+    if not lock.acquire():
+        _say("Outra instância do serviço já está em execução — nada a fazer.")
         return 0
 
     paths.ensure_config_dir()
@@ -181,6 +195,8 @@ def cmd_start(args: argparse.Namespace) -> int:
     except OSError as exc:
         _say(f"Não foi possível abrir a porta {port}: {exc}")
         return 1
+    finally:
+        lock.release()
     return 0
 
 
@@ -197,7 +213,47 @@ def cmd_gui(args: argparse.Namespace) -> int:
     """Open the small desktop control panel (Tkinter)."""
     from .gui import launch
 
-    return launch()
+    # `--autostart` respeita a preferência salva; `--minimized` força.
+    minimized = args.minimized or (args.autostart and settings.start_minimized)
+    return launch(minimized=minimized)
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Consulta, baixa e prepara a atualização (aplicada no próximo início)."""
+    pending = updater.pending_version()
+    if pending and not args.check:
+        _say(f"A versão {pending} já está baixada — reinicie o app para aplicá-la.")
+        return 0
+
+    _say(f"Versão instalada: {updater.__version__}")
+    _say("Consultando o GitHub...")
+
+    release = updater.check_for_update()
+    if release is None:
+        _say("Você já está na versão mais recente.")
+        return 0
+
+    _say(f"Disponível: {release.tag}  ({release.page_url})")
+    if args.check:
+        return 0
+
+    if not autostart.is_frozen():
+        _say("")
+        _say("Esta instalação veio do pip, então a troca é por lá:")
+        _say(f"  {updater.update_hint()}")
+        return 0
+
+    if not release.has_executable:
+        _say("A release não traz o executável do Windows — baixe manualmente pela página.")
+        return 1
+
+    _say("Baixando e conferindo o checksum...")
+    if updater.download(release) is None:
+        _say("Falha ao baixar ou verificar a atualização — nada foi alterado.")
+        return 1
+
+    _say(f"Pronto. Feche e abra o app para aplicar a {release.version}.")
+    return 0
 
 
 def cmd_shortcut(args: argparse.Namespace) -> int:
@@ -404,7 +460,17 @@ def build_parser() -> argparse.ArgumentParser:
     setup.set_defaults(func=cmd_setup)
 
     gui = sub.add_parser("gui", help="Abre a janela do app (sem terminal)")
+    gui.add_argument("--minimized", action="store_true", help="Abre direto na bandeja")
+    gui.add_argument(
+        "--autostart",
+        action="store_true",
+        help="Modo usado pelo início automático: respeita a preferência salva",
+    )
     gui.set_defaults(func=cmd_gui)
+
+    upd = sub.add_parser("update", help="Baixa a atualização mais recente")
+    upd.add_argument("--check", action="store_true", help="Só verifica, não baixa")
+    upd.set_defaults(func=cmd_update)
 
     sc = sub.add_parser("shortcut", help="Cria ou remove o atalho da janela do app")
     sc.add_argument("action", choices=["create", "remove"], nargs="?", default="create")
@@ -429,6 +495,14 @@ def main(argv: list[str] | None = None) -> int:
     if autostart.is_frozen():
         _attach_log_sink()
     _use_utf8_console()
+
+    # A troca do executável acontece aqui, no começo de tudo: nenhuma trava foi
+    # tomada, nenhum servidor subiu, e o Windows permite renomear um .exe em
+    # execução (mas não sobrescrevê-lo). Se trocou, este processo já relançou o
+    # novo binário e só lhe resta sair.
+    updater.cleanup_backup()
+    if updater.apply_pending_update():
+        return 0
     parser = build_parser()
     argv = list(sys.argv[1:] if argv is None else argv)
 

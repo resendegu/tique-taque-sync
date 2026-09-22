@@ -52,28 +52,43 @@ def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-def _launch_command(windowless: bool = False) -> list[str]:
-    """Build the command line that starts the background service.
+def _autostart_arguments() -> list[str]:
+    """O que o login do usuário dispara.
+
+    Abre a **janela**, não o serviço cru: a janela sobe o serviço sozinha e
+    aparece na bandeja. Antes isto registrava `start --no-browser`, e o
+    resultado era um processo invisível — sem janela, sem bandeja e sem nada
+    que indicasse que o app estava rodando.
+
+    `--autostart` faz a janela respeitar a preferência "iniciar minimizado".
+    """
+    return ["gui", "--autostart"]
+
+
+def _launch_command(windowless: bool = False, arguments: list[str] | None = None) -> list[str]:
+    """Build the command line that starts the app.
 
     Três cenários, nesta ordem:
     1. Executável congelado (.exe): re-invoca a si mesmo com argumentos.
     2. Instalado via pip: usa o console script do PATH.
     3. Checkout do código-fonte: cai para ``python -m tiquetaque_sync``.
     """
+    arguments = arguments if arguments is not None else ["start", "--no-browser"]
+
     if is_frozen():
-        return [sys.executable, "start", "--no-browser"]
+        return [sys.executable, *arguments]
 
     script_name = "tiquetaque-syncw" if windowless else "tiquetaque-sync"
     console_script = shutil.which(script_name)
     if console_script:
-        return [console_script, "start", "--no-browser"]
+        return [console_script, *arguments]
 
     python = sys.executable
     if windowless and sys.platform == "win32":
         pythonw = Path(python).with_name("pythonw.exe")
         if pythonw.exists():
             python = str(pythonw)
-    return [python, "-m", "tiquetaque_sync", "start", "--no-browser"]
+    return [python, "-m", "tiquetaque_sync", *arguments]
 
 
 def _launch_workdir() -> str | None:
@@ -104,7 +119,7 @@ def _windows_entry() -> Path:
 def _windows_enable() -> AutostartStatus:
     entry = _windows_entry()
     entry.parent.mkdir(parents=True, exist_ok=True)
-    command = " ".join(_quote(part) for part in _launch_command(windowless=True))
+    command = " ".join(_quote(part) for part in _launch_command(windowless=True, arguments=_autostart_arguments()))
     workdir = _launch_workdir()
 
     lines = [
@@ -146,7 +161,10 @@ def _macos_entry() -> Path:
 def _macos_enable() -> AutostartStatus:
     entry = _macos_entry()
     entry.parent.mkdir(parents=True, exist_ok=True)
-    args = "".join(f"        <string>{part}</string>\n" for part in _launch_command())
+    args = "".join(
+        f"        <string>{part}</string>\n"
+        for part in _launch_command(arguments=_autostart_arguments())
+    )
     workdir = _launch_workdir()
     workdir_key = (
         f"    <key>WorkingDirectory</key>\n    <string>{workdir}</string>\n" if workdir else ""
@@ -207,7 +225,7 @@ def _has_systemd() -> bool:
 
 
 def _linux_enable() -> AutostartStatus:
-    command = " ".join(_quote(part) for part in _launch_command())
+    command = " ".join(_quote(part) for part in _launch_command(arguments=_autostart_arguments()))
     workdir = _launch_workdir()
 
     if _has_systemd():
@@ -290,8 +308,13 @@ def _run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
 # Public API
 # ------------------------------------------------------------------------------
 def launch_command(windowless: bool = False) -> list[str]:
-    """Comando que sobe o serviço em background (usado pela GUI e pelos atalhos)."""
+    """Comando que sobe **o serviço** em background (usado pela janela)."""
     return _launch_command(windowless=windowless)
+
+
+def autostart_command(windowless: bool = True) -> list[str]:
+    """Comando registrado no login do usuário: abre a janela, não o serviço."""
+    return _launch_command(windowless=windowless, arguments=_autostart_arguments())
 
 
 def launch_workdir() -> str | None:

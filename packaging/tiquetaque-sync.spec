@@ -38,6 +38,9 @@ VERSION_FILE = version_info_module.write(
 # Templates, CSS, JS e ícone do painel: sem isto o .exe sobe mas não renderiza.
 datas = [
     (str(PACKAGE / "web"), "tiquetaque_sync/web"),
+    # Ícone do app: a janela Tk e a bandeja o carregam em tempo de execução,
+    # então não basta o `icon=` do EXE (que é só o recurso do arquivo).
+    (str(PACKAGE / "assets"), "tiquetaque_sync/assets"),
 ]
 
 # uvicorn e apscheduler carregam módulos por nome em tempo de execução, então o

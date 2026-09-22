@@ -35,6 +35,8 @@ EDITABLE_KEYS = (
     "host",
     "port",
     "open_browser_on_start",
+    "start_minimized",
+    "auto_check_updates",
 )
 
 #: Never returned verbatim by the API; the UI only learns whether they are filled in.

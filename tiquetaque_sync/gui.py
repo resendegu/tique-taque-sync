@@ -21,8 +21,20 @@ import urllib.request
 import webbrowser
 from dataclasses import dataclass
 
-from . import autostart, paths
+from . import autostart, paths, store, tray, updater
 from .config import reload_settings, settings
+from .singleton import SingleInstance, focus_existing_window
+
+WINDOW_TITLE = "TiqueTaque Sync"
+
+# Itens do menu da bandeja: (identificador, rótulo). Rótulo None = separador.
+TRAY_MENU = [
+    ("show", "Abrir janela"),
+    ("dashboard", "Abrir painel no navegador"),
+    ("settings", "Configurações"),
+    ("sep", None),
+    ("quit", "Sair"),
+]
 
 PROBE_MS = 2000      # com que frequência perguntamos ao serviço
 DRAIN_MS = 200       # com que frequência a janela consome o resultado
@@ -104,7 +116,7 @@ def _spawn_service() -> subprocess.Popen:
 # Janela
 # ------------------------------------------------------------------------------
 class ControlPanel:
-    def __init__(self) -> None:
+    def __init__(self, minimized: bool = False, release_lock=None) -> None:
         try:
             import tkinter as tk
             from tkinter import messagebox
@@ -120,17 +132,62 @@ class ControlPanel:
 
         self._process: subprocess.Popen | None = None
         self._results: queue.Queue[ServiceState] = queue.Queue()
+        self._update_queue: queue.Queue = queue.Queue()
         self._probe_in_flight = False
+        self._tray_hint_shown = False
+        self._update_release = None      # release disponível, ainda não baixada
+        self._update_busy = False
+        self._release_lock = release_lock or (lambda: None)
 
         self.root = tk.Tk()
-        self.root.title("TiqueTaque Sync")
+        self.root.title(WINDOW_TITLE)
         self.root.configure(bg=BG)
-        self.root.minsize(420, 430)
+        self.root.minsize(420, 470)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._apply_window_icon()
+
+        # A bandeja vem antes dos widgets porque o checkbox de "iniciar
+        # minimizado" só faz sentido quando ela existe. Sem bandeja, uma janela
+        # escondida seria um processo invisível — exatamente a queixa que
+        # motivou esta mudança.
+        self.tray = tray.create(WINDOW_TITLE, paths.app_icon("ico"), TRAY_MENU, "show")
+        self.tray_supported = self.tray is not None
 
         self._build_widgets()
+
+        if minimized and not self.tray_supported:
+            minimized = False
+
+        if minimized:
+            self.root.withdraw()
+
         self._refresh()
         self._drain_loop()
+
+        # Abrir o app e o serviço estar parado não faz sentido para o usuário:
+        # ele quer ser notificado, não administrar processos.
+        self.root.after(400, self._ensure_service_running)
+        if settings.auto_check_updates:
+            self.root.after(2500, self._check_updates_async)
+
+    def _apply_window_icon(self) -> None:
+        """Troca o ícone padrão do Tk pelo relógio do app."""
+        ico = paths.app_icon("ico")
+        if ico and sys.platform == "win32":
+            try:
+                self.root.iconbitmap(default=str(ico))
+                return
+            except Exception:
+                pass
+
+        # Tk 8.6 lê PNG; é o caminho para Linux e macOS, e reserva no Windows.
+        png = paths.app_icon("png")
+        if png:
+            try:
+                self._icon_image = self.tk.PhotoImage(file=str(png))
+                self.root.iconphoto(True, self._icon_image)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------ layout
     def _build_widgets(self) -> None:
@@ -215,11 +272,46 @@ class ControlPanel:
             font=("Segoe UI", 8), anchor="w", justify="left", wraplength=380,
         ).pack(fill="x")
 
-        footer = tk.Label(
+        self.minimized_var = tk.BooleanVar(value=settings.start_minimized)
+        self.minimized_check = tk.Checkbutton(
+            options,
+            text="Iniciar minimizado na bandeja",
+            variable=self.minimized_var,
+            command=self._on_minimized_toggle,
+            bg=BG, fg=FG, selectcolor=BG_CARD, activebackground=BG, activeforeground=FG,
+            highlightthickness=0, borderwidth=0, font=("Segoe UI", 9), anchor="w",
+        )
+        self.minimized_check.pack(fill="x", pady=(6, 0))
+
+        self.minimized_detail = tk.StringVar(
+            value="Ao iniciar com o sistema, abre só o ícone da bandeja."
+            if self.tray_supported
+            else "Bandeja indisponível nesta plataforma — a janela sempre abre."
+        )
+        tk.Label(
+            options, textvariable=self.minimized_detail, bg=BG, fg=FG_MUTED,
+            font=("Segoe UI", 8), anchor="w", justify="left", wraplength=380,
+        ).pack(fill="x")
+
+        if not self.tray_supported:
+            self.minimized_check.configure(state="disabled")
+
+        # Faixa de atualização: fica escondida até haver o que anunciar, para
+        # não ocupar espaço no uso normal.
+        self.update_frame = tk.Frame(root, bg=BG_CARD, padx=14, pady=10)
+        self.update_var = tk.StringVar(value="")
+        tk.Label(
+            self.update_frame, textvariable=self.update_var, bg=BG_CARD, fg=FG,
+            font=("Segoe UI", 9, "bold"), anchor="w", justify="left", wraplength=360,
+        ).pack(fill="x")
+        self.update_btn = self._button(self.update_frame, "Baixar e instalar", self._on_update_click)
+        self.update_btn.pack(fill="x", pady=(8, 0))
+
+        self.footer = tk.Label(
             root, text=f"Configuração: {paths.config_file()}", bg=BG, fg="#6b7280",
             font=("Segoe UI", 7), anchor="w", justify="left", wraplength=380,
         )
-        footer.pack(fill="x", padx=20, pady=(8, 14))
+        self.footer.pack(fill="x", padx=20, pady=(8, 14))
 
         self._sync_autostart_widget()
 
@@ -251,7 +343,42 @@ class ControlPanel:
     def _drain_loop(self) -> None:
         """Consome o resultado assim que ele chega, sem esperar o próximo probe."""
         self._drain_results()
+        self._drain_tray_events()
+        self._drain_update_events()
         self.root.after(DRAIN_MS, self._drain_loop)
+
+    def _drain_update_events(self) -> None:
+        """Resultados da thread de atualização, aplicados no laço do Tk."""
+        while True:
+            try:
+                event = self._update_queue.get_nowait()
+            except queue.Empty:
+                break
+            if isinstance(event, tuple) and event[0] == "downloaded":
+                self._on_download_finished(event[1])
+            else:
+                self._on_update_available(event)
+
+    def _drain_tray_events(self) -> None:
+        """Executa, no laço do Tk, os comandos vindos da thread da bandeja."""
+        if self.tray is None:
+            return
+        while True:
+            try:
+                command = self.tray.events.get_nowait()
+            except queue.Empty:
+                break
+            self._handle_tray_command(command)
+
+    def _handle_tray_command(self, command: str) -> None:
+        if command == "show":
+            self._show_window()
+        elif command == "dashboard":
+            self._open_dashboard()
+        elif command == "settings":
+            self._open_settings()
+        elif command == "quit":
+            self._quit()
 
     def _probe_worker(self) -> None:
         try:
@@ -360,19 +487,189 @@ class ControlPanel:
             return
         self.autostart_detail.set(state.location or state.mechanism)
 
-    def _on_close(self) -> None:
-        """Fechar a janela não derruba o serviço — ele segue notificando."""
+    # --------------------------------------------------------------- updates
+    def _check_updates_async(self) -> None:
+        """Consulta o GitHub em thread — a rede nunca bloqueia o laço do Tk."""
+        pending = updater.pending_version()
+        if pending:
+            self._show_update_banner(
+                f"Versão {pending} baixada e pronta.",
+                "Atualizar",
+            )
+            return
+
+        def worker() -> None:
+            release = updater.check_for_update()
+            if release is not None:
+                self._update_queue.put(release)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _show_update_banner(self, message: str, button_label: str) -> None:
+        self.update_var.set(message)
+        self.update_btn.configure(text=button_label, state="normal")
+        self.update_frame.pack(fill="x", padx=20, pady=(4, 0), before=self.footer)
+
+    def _on_update_available(self, release) -> None:
+        self._update_release = release
+        if not autostart.is_frozen():
+            # Instalação via pip não troca binário: mostra o comando e pronto.
+            self._show_update_banner(
+                f"Versão {release.version} disponível. Atualize com:\n{updater.update_hint()}",
+                "Abrir a página da release",
+            )
+            return
+
+        self._show_update_banner(f"Versão {release.version} disponível.", "Baixar e instalar")
+        if self.tray is not None:
+            self.tray.notify(
+                "Atualização disponível",
+                f"TiqueTaque Sync {release.version} pode ser instalado.",
+            )
+
+    def _on_update_click(self) -> None:
+        if self._update_busy:
+            return
+
+        # Já baixado: o clique é para reiniciar e aplicar.
+        if updater.pending_version():
+            self._restart_to_update()
+            return
+
+        release = self._update_release
+        if release is None:
+            return
+
+        if not autostart.is_frozen():
+            webbrowser.open(release.page_url)
+            return
+
+        self._update_busy = True
+        self.update_btn.configure(state="disabled", text="Baixando...")
+
+        def worker() -> None:
+            path = updater.download(release)
+            self._update_queue.put(("downloaded", path))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_download_finished(self, path) -> None:
+        self._update_busy = False
+        if path is None:
+            self.update_var.set(
+                "Falha ao baixar ou verificar a atualização. Nada foi alterado."
+            )
+            self.update_btn.configure(state="normal", text="Tentar de novo")
+            return
+        self._show_update_banner(
+            f"Versão {updater.pending_version()} pronta para instalar.",
+            "Reiniciar e atualizar",
+        )
+
+    def _restart_to_update(self) -> None:
+        """Aplica a troca e reabre o app.
+
+        A ordem importa: encerra o serviço e solta a trava **antes** de lançar o
+        novo processo, senão ele esbarraria na instância única e sairia sem abrir.
+        """
+        if not updater.apply_pending_update(relaunch=False):
+            self.messagebox.showerror(
+                "TiqueTaque Sync",
+                "Não foi possível aplicar a atualização.\n"
+                "Verifique o log do app e tente novamente.",
+            )
+            return
+
+        if self._process and self._process.poll() is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+
+        if self.tray is not None:
+            self.tray.stop()
+        self._release_lock()
+
+        try:
+            kwargs = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+            subprocess.Popen([sys.executable, "gui"], **kwargs)
+        except OSError as exc:
+            self.messagebox.showerror(
+                "TiqueTaque Sync", f"Atualizado, mas não consegui reabrir:\n{exc}"
+            )
         self.root.destroy()
+
+    def _on_minimized_toggle(self) -> None:
+        try:
+            store.save({"start_minimized": self.minimized_var.get()})
+            reload_settings()
+        except OSError as exc:
+            self.minimized_var.set(not self.minimized_var.get())
+            self.messagebox.showerror("TiqueTaque Sync", f"Não foi possível salvar:\n{exc}")
+
+    def _ensure_service_running(self) -> None:
+        """Sobe o serviço se ele não estiver no ar — sem duplicar o que já roda."""
+        if probe_service().running:
+            return
+        self._start_service()
+
+    def _show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _quit(self) -> None:
+        """Encerra a janela e, se o serviço for filho desta janela, o serviço."""
+        if self._process and self._process.poll() is None:
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+        if self.tray is not None:
+            self.tray.stop()
+        self.root.destroy()
+
+    def _on_close(self) -> None:
+        """O X esconde na bandeja; sair mesmo é pelo menu da bandeja.
+
+        Sem bandeja (Linux/macOS), mantém o comportamento antigo: fecha a janela
+        e o serviço segue rodando em background.
+        """
+        if self.tray is None:
+            self.root.destroy()
+            return
+
+        self.root.withdraw()
+        if not self._tray_hint_shown:
+            self._tray_hint_shown = True
+            self.tray.notify(
+                "TiqueTaque Sync continua rodando",
+                "A janela foi minimizada para a bandeja. Clique no ícone para reabrir.",
+            )
 
     def run(self) -> None:
         self.root.mainloop()
 
 
-def launch() -> int:
-    """Abre a janela de controle. Retorna o código de saída do processo."""
+def launch(minimized: bool = False) -> int:
+    """Abre a janela de controle. Retorna o código de saída do processo.
+
+    Uma segunda janela não é aberta: a trava de instância única faz a janela já
+    existente vir para frente, em vez de duplicar o painel.
+    """
+    lock = SingleInstance("gui")
+    if not lock.acquire():
+        if not focus_existing_window(WINDOW_TITLE):
+            print("O TiqueTaque Sync já está aberto (veja a bandeja do sistema).")
+        return 0
+
     try:
-        ControlPanel().run()
+        ControlPanel(minimized=minimized, release_lock=lock.release).run()
     except TkinterUnavailable as exc:
         print(exc)
         return 1
+    finally:
+        lock.release()
     return 0

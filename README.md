@@ -175,8 +175,39 @@ tiquetaque-sync gui
 
 A janela mostra se o serviço está ativo, quantas horas você já trabalhou hoje e a
 previsão de saída, com três botões: **iniciar/parar serviço**, **abrir painel no
-navegador** e **configurações**. Fechar a janela **não** para o serviço — ele
-continua sincronizando e notificando em background.
+navegador** e **configurações**. Ao abrir, ela já sobe o serviço sozinha.
+
+No Windows o app fica na **bandeja do sistema** (ao lado do relógio):
+
+- Fechar a janela no **X** apenas a esconde na bandeja — o serviço continua notificando.
+- **Clique** no ícone reabre a janela; **botão direito** abre o menu (painel, configurações, sair).
+- **Sair** pelo menu da bandeja encerra a janela e o serviço.
+
+Abrir o app uma segunda vez não duplica nada: a janela que já existe vem para frente. O
+serviço também roda em instância única, então não há risco de duas cópias notificando em
+dobro.
+
+### Atualização automática
+
+O app verifica sozinho se há versão nova no GitHub. Quando há, aparece um aviso na janela com
+o botão **Baixar e instalar**; depois é só **Reiniciar e atualizar**.
+
+**Suas configurações não se perdem.** Credenciais, canais e horários ficam em
+`%APPDATA%\TiqueTaqueSync\config.json`, fora do executável — a atualização troca só o `.exe`.
+
+Pelo terminal:
+
+```bash
+tiquetaque-sync update --check   # só verifica
+tiquetaque-sync update           # baixa e prepara (aplica ao reabrir o app)
+```
+
+O download é conferido contra o checksum publicado na mesma release; se não bater, nada é
+instalado. A verificação automática pode ser desligada em `config.json`
+(`auto_check_updates: false`).
+
+> A versão em pasta (`TiqueTaqueSync-pasta.zip`) não se atualiza sozinha — baixe a nova e
+> substitua a pasta. Quem instalou por `pip` atualiza com `pip install --upgrade`.
 
 O overview detalhado (anel de progresso, timeline de batidas, contagem regressiva)
 continua sendo a página web, aberta pelo botão da janela.
@@ -198,6 +229,9 @@ tiquetaque-sync autostart disable   # desativar
 ```
 
 Ou pelo botão **"Iniciar junto com o sistema"** — disponível tanto na janela do app quanto na tela de configurações.
+
+Ao lado dele há **"Iniciar minimizado na bandeja"**: com ele marcado, ligar o computador abre
+só o ícone da bandeja, sem a janela na frente. Desmarcado, a janela aparece normalmente.
 
 | Sistema | O que é criado | Onde |
 | ------- | -------------- | ---- |
@@ -222,6 +256,7 @@ Nada exige permissão de administrador: tudo é escrito no perfil do próprio us
 | `tiquetaque-sync open --settings` | Abre a tela de configurações de uma instância em execução |
 | `tiquetaque-sync autostart enable\|disable\|status` | Controla o início automático com o sistema |
 | `tiquetaque-sync config show\|path\|edit` | Mostra, localiza ou abre o arquivo de configuração |
+| `tiquetaque-sync update [--check]` | Baixa a versão nova do GitHub (aplicada ao reabrir) |
 | `tiquetaque-sync test --channel slack` | Envia uma notificação de teste |
 
 ---

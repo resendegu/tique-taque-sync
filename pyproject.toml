@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tiquetaque-sync"
-version = "2.0.4"
+version = "2.1.0"
 description = "Monitor de jornada TiqueTaque: painel web local, notificações no Slack/Telegram e autostart com o sistema"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -48,4 +48,4 @@ Issues = "https://github.com/resendegu/tique-taque-sync/issues"
 include = ["tiquetaque_sync*"]
 
 [tool.setuptools.package-data]
-tiquetaque_sync = ["web/templates/*.html", "web/static/css/*.css", "web/static/js/*.js", "web/static/img/*"]
+tiquetaque_sync = ["web/templates/*.html", "web/static/css/*.css", "web/static/js/*.js", "web/static/img/*", "assets/*"]

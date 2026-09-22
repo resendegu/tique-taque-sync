@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535)
     data_dir: Path = Field(default_factory=paths.data_dir)
     open_browser_on_start: bool = True
+    start_minimized: bool = False
+    auto_check_updates: bool = True
     api_secret_key: str = "default-insecure-secret"
 
     @classmethod

@@ -115,8 +115,20 @@ def encode_ico(png: bytes) -> bytes:
 
 
 def main() -> None:
-    OUT.write_bytes(encode_ico(encode_png(build_pixels())))
+    png = encode_png(build_pixels())
+
+    OUT.write_bytes(encode_ico(png))
     print(f"Ícone gerado: {OUT} ({OUT.stat().st_size} bytes)")
+
+    # Os mesmos bitmaps entram no pacote, porque a janela e a bandeja precisam
+    # deles em tempo de execução — não só o PyInstaller em tempo de build.
+    # O .ico serve o Windows (janela e bandeja); o .png serve o Tk em Linux e
+    # macOS, que não lê .ico.
+    assets = Path(__file__).resolve().parent.parent / "tiquetaque_sync" / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / "icon.ico").write_bytes(encode_ico(png))
+    (assets / "icon.png").write_bytes(png)
+    print(f"Copiado para o pacote: {assets}")
 
 
 if __name__ == "__main__":

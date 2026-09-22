@@ -50,6 +50,24 @@ def config_file() -> Path:
     return config_dir() / "config.json"
 
 
+def package_dir() -> Path:
+    """Diretório do pacote em tempo de execução.
+
+    No executável congelado os dados são extraídos para ``sys._MEIPASS``, e não
+    ficam ao lado do módulo — daí o caso especial.
+    """
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        return Path(bundle) / "tiquetaque_sync"
+    return Path(__file__).resolve().parent
+
+
+def app_icon(extension: str = "ico") -> Path | None:
+    """Caminho do ícone do app (relógio roxo), ou None se não empacotado."""
+    candidate = package_dir() / "assets" / f"icon.{extension}"
+    return candidate if candidate.exists() else None
+
+
 def ensure_config_dir() -> Path:
     """Cria (se preciso) o diretório de configuração e o devolve.
 
