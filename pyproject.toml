@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tiquetaque-sync"
-version = "2.1.0"
+version = "2.1.1"
 description = "Monitor de jornada TiqueTaque: painel web local, notificações no Slack/Telegram e autostart com o sistema"
 readme = "README.md"
 requires-python = ">=3.11"
