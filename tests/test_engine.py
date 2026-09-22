@@ -259,6 +259,16 @@ def test_workday_engine_additional_exit_punch_summary():
     assert "08h00min" in punch_6_trigger["message"]
     assert "Meta diária de 8h cumprida" in punch_6_trigger["message"]
 
+    # 7 punches: returning at 18:00 after completing 8h (overtime / on-call)
+    now_7 = tz.localize(datetime(2026, 9, 21, 18, 0))
+    status_7 = engine.calculate_status(["08:00", "10:00", "10:30", "12:00", "13:00", "17:30", "18:00"], current_dt=now_7)
+    assert status_7.estimated_departure is None
+    triggers_7 = engine.evaluate_alert_triggers(status_7, current_dt=now_7)
+    punch_7_trigger = next(t for t in triggers_7 if t["key"] == "entry_6_18:00")
+    assert "Retorno" in punch_7_trigger["title"]
+    assert "Horário previsto para encerramento da jornada" not in punch_7_trigger["message"]
+
+
 
 # ------------------------------------------------------------------------------
 # unittest wrappers so the plain-function tests above are picked up by discovery
