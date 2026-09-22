@@ -2,18 +2,38 @@
 """Receita do executável Windows (TiqueTaqueSync.exe).
 
     pip install pyinstaller
-    pyinstaller packaging/tiquetaque-sync.spec --noconfirm
+    pyinstaller packaging/tiquetaque-sync.spec --noconfirm              # arquivo único
+    TTQ_ONEDIR=1 pyinstaller packaging/tiquetaque-sync.spec --noconfirm # pasta
 
-Gera `dist/TiqueTaqueSync.exe`: arquivo único, sem console, que abre a janela
-quando executado sem argumentos e age como CLI quando recebe argumentos.
+Os dois modos produzem o mesmo app — sem console, abrindo a janela quando
+executado sem argumentos e agindo como CLI quando recebe argumentos.
+
+Por que dois modos: o `--onefile` se descompacta em `%TEMP%` a cada execução, e
+esse comportamento é um dos gatilhos clássicos de heurística de antivírus. O
+modo pasta não faz isso e é bem menos sinalizado — em troca, é um diretório
+inteiro em vez de um arquivo só. Publicamos os dois e deixamos o usuário
+escolher.
 """
 
+import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
 REPO_ROOT = Path(SPECPATH).resolve().parent
 PACKAGE = REPO_ROOT / "tiquetaque_sync"
+
+ONEDIR = os.environ.get("TTQ_ONEDIR", "").lower() in ("1", "true", "yes")
+
+# Recurso VERSIONINFO gerado a partir da versão do pyproject.toml. Executável
+# sem esses campos pontua mal nos motores de antivírus baseados em ML.
+sys.path.insert(0, str(Path(SPECPATH)))
+import version_info as version_info_module  # noqa: E402
+
+VERSION_FILE = version_info_module.write(
+    REPO_ROOT, Path(SPECPATH) / "version_info.txt"
+)
 
 # Templates, CSS, JS e ícone do painel: sem isto o .exe sobe mas não renderiza.
 datas = [
@@ -47,18 +67,12 @@ a = Analysis(
 
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+common = dict(
     name="TiqueTaqueSync",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,  # UPX dispara falso-positivo em vários antivírus
-    runtime_tmpdir=None,
+    upx=False,  # UPX é um dos sinais mais fortes de malware para antivírus
     console=False,  # janela do app, não terminal
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -66,4 +80,26 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(Path(SPECPATH) / "icon.ico"),
+    version=str(VERSION_FILE),
 )
+
+if ONEDIR:
+    exe = EXE(pyz, a.scripts, [], exclude_binaries=True, **common)
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="TiqueTaqueSync",
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        runtime_tmpdir=None,
+        **common,
+    )

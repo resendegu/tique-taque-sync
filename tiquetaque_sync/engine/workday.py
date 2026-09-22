@@ -273,10 +273,16 @@ class WorkdayEngine:
             continuous_worked = current_shift_worked
             stage = WorkdayStage.WORKING_AFTERNOON
 
-            departure_dt = dts[-1] + timedelta(seconds=max(0, self.target_seconds - completed_worked))
-            secs_to_departure = max(0, int((departure_dt - current_dt).total_seconds()))
-            next_alert_label = "Fim da jornada (8h)"
-            next_alert_seconds = secs_to_departure
+            if completed_worked < self.target_seconds:
+                departure_dt = dts[-1] + timedelta(seconds=self.target_seconds - completed_worked)
+                departure_str = departure_dt.strftime("%H:%M")
+                secs_to_departure = max(0, int((departure_dt - current_dt).total_seconds()))
+                next_alert_label = "Fim da jornada (8h)"
+                next_alert_seconds = secs_to_departure
+            else:
+                departure_str = None
+                next_alert_label = "Meta diária de 8h cumprida"
+                next_alert_seconds = 0
             progress = (total_worked / self.target_seconds) * 100.0
 
             return WorkdayStatus(
@@ -286,7 +292,7 @@ class WorkdayEngine:
                 worked_seconds=total_worked,
                 target_seconds=self.target_seconds,
                 lunch_duration_seconds=last_completed_break,
-                estimated_departure=departure_dt.strftime("%H:%M"),
+                estimated_departure=departure_str,
                 next_alert_label=next_alert_label,
                 next_alert_seconds=next_alert_seconds,
                 progress_percentage=progress,
@@ -380,17 +386,16 @@ class WorkdayEngine:
                     "level": "info",
                 })
             elif i == 2:
-                dur_sec = max(0, int((dts[2] - dts[1]).total_seconds()))
-                dur_str = format_seconds_to_hm(dur_sec)
-                est_dep = status.estimated_departure or "Horário padrão"
+                dur_str = format_seconds_to_hm(status.lunch_duration_seconds)
+                dep_phrase = f"Horário previsto para encerramento do expediente: <b>{status.estimated_departure}</b>.\n" if status.estimated_departure else ""
                 triggers.append({
                     "key": entry_key,
                     "title": f"⏱️ Ponto Registrado: Retorno do Intervalo ({t})",
                     "message": (
                         f"Seu retorno do intervalo foi confirmado às <b>{t}</b> (intervalo de <b>{dur_str}</b>).\n"
-                        f"Horário previsto para encerramento do expediente: <b>{est_dep}</b>.\n"
+                        f"{dep_phrase}"
                         "Bom retorno ao trabalho! 💼"
-                    ),
+                    ).replace("\n\n\n", "\n\n"),
                     "level": "info",
                 })
             elif i % 2 == 1:
@@ -435,15 +440,23 @@ class WorkdayEngine:
                 # Retorno de pausa adicional (batidas 5, 7...)
                 pause_sec = max(0, int((dts[i] - dts[i - 1]).total_seconds()))
                 pause_str = format_seconds_to_hm(pause_sec)
-                est_dep = status.estimated_departure or "Horário padrão"
+                worked_up_to_punch = sum(
+                    max(0, int((dts[j + 1] - dts[j]).total_seconds()))
+                    for j in range(0, i, 2)
+                )
+                if worked_up_to_punch >= self.target_seconds or not status.estimated_departure:
+                    dep_phrase = ""
+                else:
+                    dep_phrase = f"Horário previsto para encerramento da jornada: <b>{status.estimated_departure}</b>.\n"
+
                 triggers.append({
                     "key": entry_key,
                     "title": f"⏱️ Ponto Registrado: Retorno ({t})",
                     "message": (
                         f"Seu retorno foi confirmado às <b>{t}</b> (intervalo de <b>{pause_str}</b>).\n"
-                        f"Horário previsto para encerramento da jornada: <b>{est_dep}</b>.\n"
+                        f"{dep_phrase}"
                         "Bom retorno ao trabalho! 💼"
-                    ),
+                    ).replace("\n\n\n", "\n\n"),
                     "level": "info",
                 })
 

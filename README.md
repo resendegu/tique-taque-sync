@@ -80,6 +80,26 @@ e execute. É um arquivo único, sem instalador: a janela do app abre, você cli
 > Get-FileHash .\TiqueTaqueSync.exe -Algorithm SHA256
 > ```
 
+#### O antivírus bloqueou o arquivo?
+
+São dois avisos diferentes, com causas diferentes:
+
+| O que aparece | O que é | O que fazer |
+| --- | --- | --- |
+| "O Windows protegeu o computador" com botão *Mais informações* | **SmartScreen** — reputação, não vírus. Todo executável novo e sem assinatura começa assim. | *Mais informações → Executar assim mesmo* |
+| "Ameaça encontrada", arquivo some ou vai para quarentena | **Defender/antivírus** — falso positivo de heurística | Baixe o **`TiqueTaqueSync-pasta.zip`** (abaixo) |
+
+O `TiqueTaqueSync-pasta.zip`, publicado em toda release, é exatamente o mesmo app em formato
+de pasta. O `.exe` único precisa se descompactar em `%TEMP%` a cada execução, e é esse
+comportamento que dispara a heurística; a versão em pasta não faz isso e costuma passar
+sem reclamação. Extraia o zip e rode o `TiqueTaqueSync.exe` de dentro dela, mantendo a
+pasta `_internal` ao lado.
+
+Se ainda assim o Defender bloquear, [envie o arquivo à
+Microsoft](https://www.microsoft.com/en-us/wdsi/filesubmission) marcando como *falso
+positivo* — a análise é gratuita e costuma sair em alguns dias; quando aceita, a detecção
+some para todo mundo, não só para você.
+
 O mesmo `.exe` também serve de CLI, o que é útil para o autostart:
 `TiqueTaqueSync.exe start --no-browser`.
 

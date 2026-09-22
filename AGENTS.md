@@ -340,6 +340,15 @@ que **abre a janela quando executado sem argumentos e age como CLI quando recebe
 6. **`multiprocessing.freeze_support()`** fica na primeira linha do entry point — sem ele um
    processo filho reabriria a janela.
 7. **Sem UPX** no `.spec`: compressão dispara falso-positivo de antivírus.
+8. **O `.spec` produz dois formatos.** Sem variável de ambiente sai o arquivo único; com
+   `TTQ_ONEDIR=1` sai a versão em pasta (`COLLECT`). A release publica os dois, porque o
+   modo arquivo único se descompacta em `%TEMP%` a cada execução e isso é gatilho de
+   heurística de antivírus. Ao mexer em `datas`/`hiddenimports`, lembre que os dois modos
+   compartilham o mesmo `Analysis` — teste os dois.
+9. **O recurso VERSIONINFO não é enfeite.** `packaging/version_info.py` gera os campos
+   (empresa, produto, versão, descrição) a partir do `pyproject.toml`, e o `.spec` embute
+   via `version=`. Binário sem esses campos pontua mal em antivírus baseado em ML. Não
+   remova, e não versione o `version_info.txt` — ele é derivado.
 
 ### Notas da release
 
@@ -354,9 +363,24 @@ checksum, as alternativas de instalação e a mensagem do último commit. Duas i
 Detalhe de PowerShell: dentro do here-string `@"..."@` a crase é caractere de escape, então
 uma cerca de código Markdown precisa ser escrita com **seis** crases para produzir três.
 
-O executável não é assinado; o SmartScreen avisa na primeira execução. Isso está documentado
-no README junto do `.sha256` publicado. Se um dia houver certificado, assine no `release.yml`
-entre o build e o upload.
+### Antivírus e assinatura
+
+O executável não é assinado; o SmartScreen avisa na primeira execução e o Defender pode
+marcar falso positivo. As mitigações gratuitas já aplicadas, em ordem de eficácia:
+
+1. **Versão em pasta** publicada junto (`TiqueTaqueSync-pasta.zip`) — evita a
+   descompactação em `%TEMP%`, que é o gatilho mais comum.
+2. **Recurso VERSIONINFO** preenchido a partir do `pyproject.toml`.
+3. **UPX desativado.**
+4. **Checksum publicado** em toda release.
+
+Se uma detecção específica aparecer, o caminho é enviar o binário à Microsoft como falso
+positivo (https://www.microsoft.com/en-us/wdsi/filesubmission) — gratuito, e a remoção vale
+para todos os usuários.
+
+A solução definitiva é assinatura digital. Ao obter um certificado, assine no `release.yml`
+entre o build e o upload (e assine **os dois** artefatos: o `.exe` único e o `.exe` de dentro
+da pasta, antes de zipar).
 
 ### Gerar localmente (Windows)
 ```bash

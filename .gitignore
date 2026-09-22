@@ -47,3 +47,9 @@ config.json
 
 # Segredos reais do Kubernetes (use o .example como modelo)
 k8s/03-secret.yaml
+
+# Build em pasta do PyInstaller
+dist-onedir/
+
+# Recurso de versão gerado a partir do pyproject.toml
+packaging/version_info.txt

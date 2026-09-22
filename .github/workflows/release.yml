@@ -194,12 +194,32 @@ jobs:
             Get-Process TiqueTaqueSync -ErrorAction SilentlyContinue | Stop-Process -Force
           }
 
-      - name: Gerar checksum
+      # O modo pasta não se descompacta em %TEMP% a cada execução — que é um dos
+      # gatilhos de heurística de antivírus no modo arquivo único. Publicamos os
+      # dois: o .exe pela conveniência, o .zip para quem for bloqueado.
+      - name: Compilar a versão em pasta
+        env:
+          TTQ_ONEDIR: "1"
+        run: pyinstaller packaging/tiquetaque-sync.spec --noconfirm --clean --distpath dist-onedir --workpath build/onedir
+
+      - name: Empacotar a versão em pasta
         shell: pwsh
         run: |
-          $hash = (Get-FileHash dist\TiqueTaqueSync.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  TiqueTaqueSync.exe" | Out-File -FilePath dist\TiqueTaqueSync.exe.sha256 -Encoding ascii
-          Write-Host "SHA256: $hash"
+          $ErrorActionPreference = "Stop"
+          if (-not (Test-Path "dist-onedir\TiqueTaqueSync\TiqueTaqueSync.exe")) {
+            throw "A compilação em pasta não produziu o executável"
+          }
+          Compress-Archive -Path "dist-onedir\TiqueTaqueSync" -DestinationPath "dist\TiqueTaqueSync-pasta.zip" -Force
+
+      - name: Gerar checksums
+        shell: pwsh
+        run: |
+          foreach ($file in @("TiqueTaqueSync.exe", "TiqueTaqueSync-pasta.zip")) {
+            $path = "dist\$file"
+            $hash = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+            "$hash  $file" | Out-File -FilePath "$path.sha256" -Encoding ascii
+            Write-Host "$file  ->  $hash"
+          }
 
       - name: Publicar como artefato da execução
         uses: actions/upload-artifact@v4
@@ -208,6 +228,8 @@ jobs:
           path: |
             dist/TiqueTaqueSync.exe
             dist/TiqueTaqueSync.exe.sha256
+            dist/TiqueTaqueSync-pasta.zip
+            dist/TiqueTaqueSync-pasta.zip.sha256
           if-no-files-found: error
 
       # Só no caminho do bump de versão: a tag e a release ainda não existem.
@@ -246,7 +268,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.version.outputs.tag }}
-        run: gh release upload "$env:TAG" dist/TiqueTaqueSync.exe dist/TiqueTaqueSync.exe.sha256 --clobber
+        run: gh release upload "$env:TAG" dist/TiqueTaqueSync.exe dist/TiqueTaqueSync.exe.sha256 dist/TiqueTaqueSync-pasta.zip dist/TiqueTaqueSync-pasta.zip.sha256 --clobber
 
       # Acrescenta as instruções de download e a mensagem do commit ao corpo da
       # release. O que a pessoa escreveu à mão é preservado: o bloco gerado fica
@@ -284,6 +306,15 @@ jobs:
           > Como o executável não é assinado digitalmente, o Windows SmartScreen avisa
           > "O Windows protegeu o computador" na primeira execução.
           > Clique em **Mais informações → Executar assim mesmo**.
+
+          ### O antivírus bloqueou ou apagou o arquivo?
+
+          Baixe o **TiqueTaqueSync-pasta.zip**, também em *Assets*: é o mesmo app, mas em
+          formato de pasta. O `.exe` único se descompacta sozinho a cada execução, e esse
+          comportamento dispara heurística de antivírus com mais frequência.
+
+          Extraia o zip e execute o `TiqueTaqueSync.exe` de dentro da pasta — mantenha a
+          pasta `_internal` ao lado dele.
 
           <details>
           <summary>Conferir a integridade do download</summary>
