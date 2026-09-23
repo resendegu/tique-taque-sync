@@ -460,6 +460,12 @@ class WorkdayEngine:
                     "level": "info",
                 })
 
+            # O instante de referência deste alerta é a própria batida. Quem
+            # despacha usa isso para não anunciar batidas antigas depois de um
+            # reinício (ver `scheduler._should_announce`).
+            if triggers and triggers[-1]["key"] == entry_key:
+                triggers[-1]["moment"] = dts[i]
+
         # 2. Alertas de Intervalo (quando em LUNCH_BREAK)
         if status.stage == WorkdayStage.LUNCH_BREAK:
             secs_left = status.next_alert_seconds or 0
@@ -595,6 +601,7 @@ class WorkdayEngine:
             # Alerta de limite excedido (> 6h contínuas sem intervalo)
             elif secs_to_6h < 0:
                 triggers.append({
+                    "moment": current_dt - timedelta(seconds=abs(secs_to_6h)),
                     "key": f"clt_6h_exceeded_{shift_id}",
                     "title": "🛑 Limite Legal de 6h Contínuas Ultrapassado (CLT)",
                     "message": (
@@ -608,6 +615,7 @@ class WorkdayEngine:
         # 5. Alarme de jornada concluída
         if status.stage == WorkdayStage.COMPLETED:
             triggers.append({
+                "moment": dts[-1] if dts else current_dt,
                 "key": "workday_completed",
                 "title": "🎉 Jornada Concluída!",
                 "message": (
@@ -619,5 +627,10 @@ class WorkdayEngine:
                 ),
                 "level": "success",
             })
+
+        # Os demais alertas são janelas limitadas ("faltam de 1 a 10 minutos"),
+        # verdadeiras só perto do momento certo: o instante deles é o agora.
+        for trigger in triggers:
+            trigger.setdefault("moment", current_dt)
 
         return triggers

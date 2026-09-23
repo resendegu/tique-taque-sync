@@ -2,7 +2,7 @@
 
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 try:
@@ -31,6 +31,7 @@ class SyncScheduler:
         dispatcher: NotificationDispatcher,
         poll_interval_seconds: int = 180,
         alert_ticker_interval_seconds: int = 15,
+        stale_alert_minutes: int = 15,
         timezone_name: str = "America/Sao_Paulo",
     ):
         self.client = client
@@ -39,6 +40,8 @@ class SyncScheduler:
         self.dispatcher = dispatcher
         self.poll_interval = poll_interval_seconds
         self.alert_ticker_interval = alert_ticker_interval_seconds
+        # Alerta que se refere a mais de X minutos atrás é registrado, não enviado.
+        self.stale_alert_minutes = stale_alert_minutes
         self.tz = pytz.timezone(timezone_name)
         self._last_status: WorkdayStatus | None = None
         self._is_syncing = False
@@ -46,6 +49,46 @@ class SyncScheduler:
         self._scheduler = AsyncIOScheduler() if HAS_APSCHEDULER else None
         self._async_task: asyncio.Task | None = None
         self._ticker_task: asyncio.Task | None = None
+
+    async def _dispatch_triggers(self, triggers: list, status, now: datetime) -> None:
+        """Anuncia o que é atual e apenas registra o que já passou.
+
+        Dois cenários faziam o app despejar notificações de uma vez:
+
+        * **Reinício** — o `dispatched_alerts` vive no SQLite; num contêiner com
+          disco efêmero ele some, e todas as batidas do dia eram anunciadas de
+          novo.
+        * **Meia-noite** — a chave de deduplicação inclui a data, então à 00:00
+          tudo virava "inédito".
+
+        Nos dois casos o alerta se refere a um instante que já passou. Aqui ele é
+        gravado como despachado (para nunca mais disparar) mas não é enviado.
+        Alertas de janela curta ("faltam 5 minutos") trazem `moment = agora` e
+        passam normalmente.
+        """
+        tolerance = timedelta(minutes=self.stale_alert_minutes)
+
+        for trigger in triggers:
+            key = trigger["key"]
+            if self.db.is_alert_dispatched(status.date_str, key):
+                continue
+
+            atraso = now - (trigger.get("moment") or now)
+            if atraso > tolerance:
+                logger.info(
+                    "Silenciando '%s': refere-se a %d min atrás.",
+                    key, int(atraso.total_seconds() // 60),
+                )
+                self.db.mark_alert_dispatched(status.date_str, key, trigger["title"])
+                continue
+
+            logger.info("Firing alert '%s': %s", key, trigger["title"])
+            await self.dispatcher.dispatch(
+                title=trigger["title"],
+                message=trigger["message"],
+                level=trigger.get("level", "info"),
+            )
+            self.db.mark_alert_dispatched(status.date_str, key, trigger["title"])
 
     @property
     def last_status(self) -> WorkdayStatus | None:
@@ -114,22 +157,26 @@ class SyncScheduler:
         if not self._last_status or not self._last_status.entries:
             return
 
+        now = datetime.now(self.tz)
+
+        # As batidas em memória são do dia em que foram buscadas. Passada a
+        # meia-noite elas viram história: reavaliá-las com a data de hoje faz
+        # cada uma parecer inédita e dispara o dia inteiro de novo. Descarta e
+        # espera o poller trazer o dia corrente.
+        if self._last_status.date_str != now.strftime("%d/%m/%Y"):
+            logger.info(
+                "Virada de dia detectada (cache de %s): limpando o estado até a próxima sincronização.",
+                self._last_status.date_str,
+            )
+            self._last_status = None
+            return
+
         try:
-            now = datetime.now(self.tz)
             status = self.engine.calculate_status(self._last_status.entries, current_dt=now)
             self._last_status = status
 
             triggers = self.engine.evaluate_alert_triggers(status, current_dt=now)
-            for trigger in triggers:
-                key = trigger["key"]
-                title = trigger["title"]
-                msg = trigger["message"]
-                level = trigger.get("level", "info")
-
-                if not self.db.is_alert_dispatched(status.date_str, key):
-                    logger.info("Firing alert '%s': %s", key, title)
-                    await self.dispatcher.dispatch(title=title, message=msg, level=level)
-                    self.db.mark_alert_dispatched(status.date_str, key, title)
+            await self._dispatch_triggers(triggers, status, now)
         except Exception as e:
             logger.debug("Error during fast alert evaluation: %s", e)
 
@@ -185,16 +232,7 @@ class SyncScheduler:
 
             # Evaluate alert triggers
             triggers = self.engine.evaluate_alert_triggers(status, current_dt=now)
-            for trigger in triggers:
-                key = trigger["key"]
-                title = trigger["title"]
-                msg = trigger["message"]
-                level = trigger.get("level", "info")
-
-                if not self.db.is_alert_dispatched(status.date_str, key):
-                    logger.info("Firing alert '%s': %s", key, title)
-                    await self.dispatcher.dispatch(title=title, message=msg, level=level)
-                    self.db.mark_alert_dispatched(status.date_str, key, title)
+            await self._dispatch_triggers(triggers, status, now)
 
             return status
         except Exception as e:
